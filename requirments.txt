@@ -1,6 +1,7 @@
 numpy
 pandas
 xarray
+dask
 scipy
 cftime
 matplotlib
