@@ -1,2 +1,2 @@
-Functions for working with CTD casts from the Beaufort Gyre Exploration Project
+Functions for working with data from the Beaufort Gyre Exploration Project
 
