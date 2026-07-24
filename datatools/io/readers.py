@@ -16,5 +16,7 @@ def readLSSL(path: str) -> xr.Dataset:
         path, 
         chunks = {'cruise': 1,'station': 53},
         engine="h5netcdf")
+
+    ds = ds
     
     return ds
