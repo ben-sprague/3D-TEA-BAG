@@ -16,7 +16,7 @@ def plot_custom_section(
         cmap,
         cbar_label: str,
         levels = None
-        ) -> tuple[plt.figure, plt.axes]:
+        ) -> tuple[plt.Figure, plt.Axes]:
 
     '''
     Plot a filled contour plot
@@ -45,7 +45,7 @@ def plot_cast_locations(
         vertical_line_color:str = 'k',
         vertical_line_width:float = 1,
         vertical_line_depth:int = 4000
-        ) -> tuple[plt.figure, plt.axes]:
+        ) -> tuple[plt.Figure, plt.Axes]:
 
     '''
     Plot the location of each CTD station
@@ -80,18 +80,16 @@ def plot_cast_locations(
 
 def plot_seafloor(
         ax: plt.axes,
-        ds: xr.Dataset,
+        transect: xr.Dataset,
         x_cord_variable:str,
         draw_depth:float,
         color:str = 'grey',
         edgecolor:str = None,
-        ) -> plt.axes:
+        ) -> plt.Axes:
 
     '''
     Plot the seafloor on a section based on the deepest depth of each CTD cast
     '''
-
-    transect = ds
     
     verticies = []
     last_depth = None
@@ -127,5 +125,51 @@ def plot_seafloor(
     )
 
     ax.add_patch(poly_patch)
+
+    return ax
+
+def plot_isoline(ax: plt.Axes,
+                transect: xr.Dataset,
+                x_cord_variable:str,
+                var: str,
+                value: float,
+                min_depth: float = 0,
+                color: str = 'black',
+                linewidth: float = 1,
+                linestyle: str = '--',
+                inline_label: bool = True,
+                fmt: str = '%1.1f'
+                ) -> plt.Axes:
+    '''
+    Plot a single isoline (contour line) of a given variable at a given value on a
+    station/depth transect, with an inline temperature label.
+
+    Parameters
+    ----------
+    ax : matplotlib Axes to plot on
+    transect : xr.Dataset with dims ('station', 'depth') containing var
+    x_cord_variable: variable used on the x coordinate of the plot
+    value : the value to draw the isoline at
+    var : name of the variable in transect
+    min_depth : minimum depth to consider when contouring (shallower data excluded)
+    color, linewidth, linestyle : line styling
+    inline_label : whether to add an inline label on the contour line
+    fmt : format string for the inline label
+    '''
+
+    transect_subset = transect.sel(depth=transect['depth'] >= min_depth)
+
+    station_mesh, depth_mesh = np.meshgrid(transect_subset[x_cord_variable], transect_subset['depth'])
+
+    data = transect_subset[var].T
+
+    cs = ax.contour(station_mesh, depth_mesh, data,
+                     levels=[value],
+                     colors=color,
+                     linewidths=linewidth,
+                     linestyles=linestyle)
+
+    if inline_label:
+        ax.clabel(cs, fmt=fmt, colors=color, fontsize=9)
 
     return ax
