@@ -4,6 +4,184 @@ A set of specialty dataset opperations for working with CTD data
 
 import xarray as xr
 import numpy as np
+import ocean_tools as fod
+import gsw
+
+def injest_CTD_transect(
+        transect: xr.Dataset,
+        datum: tuple,
+        ) -> xr.Dataset:
+
+    '''
+    Sorts data by latitude, convert/calculate various values in a CTD transect for use in later calculations, relabel variables for uniformity, and add metadata to variables and coordinates for easy plotting. 
+    By default, the following calculations/conversions are preformed:
+    - Calculate coriolus parameter (fc)
+    - Calculate absolute salinity (asal)
+    - Calculate conservative temperature (ctmp)
+    - Calculate distance along the transect based on a datum (distance)
+    - Calculate the thermal wind field (m/s)
+
+    By default, the following variables are relables:
+    - Rename practical salinity (psal)
+    - Rename in-situ temperature (itmp)
+
+    By default, metadata is added to the following variables/dimentions:
+    - depth
+    - lat
+    - lon
+    - distance
+    - itmp
+    - ptmp
+    - ctmp
+    - psal
+    - asal
+    - pden
+    - twind
+
+
+    Parameters
+    ----------
+    transect : xarray dataset with CTD data
+    datum: lat/lon coordinate of datum from which to calculate distance, Tuple (lat, lon)
+
+
+    Returns
+    -------
+    transect : modified xarray dataset with all existing CTD data plus the calculated parameters
+    '''
+
+    #Define constants
+    g = 9.81 #m/s^2
+
+    #Sort transect by latitude
+    transect = transect.sortby(transect['lat'])
+    
+    #Add coriolus parameter as a variable
+    transect['fc'] = fod.fc(transect['lat'])
+
+    #Calculate sea pressure from depth (but do not store in dataset)
+    pressure = gsw.p_from_z(
+        z = -np.asarray(transect['depth'].broadcast_like(transect['lat']).transpose('station', 'depth')),
+        lat = transect['lat'].broadcast_like(transect['depth']).transpose('station', 'depth'))
+
+    #Rename practical salinity from 'sal' to 'psal'
+    transect = transect.rename_vars({'sal': 'psal'})
+
+    #Calculate practical salinity from absolute salinity
+    transect['asal'] = gsw.SA_from_SP(
+        SP = transect['psal'].broadcast_like(transect['depth']).transpose('station', 'depth'),
+        p = pressure,
+        lat = transect['lat'].broadcast_like(transect['depth']).transpose('station', 'depth'),
+        lon = transect['lon'].broadcast_like(transect['depth']).transpose('station', 'depth')
+    )
+
+    #Convert potential temperature to conservative temperature
+    transect['ctmp'] = gsw.CT_from_pt(SA = transect['asal'].broadcast_like(transect['depth']).transpose('station', 'depth'),
+                                        pt = transect['ptmp'].broadcast_like(transect['depth']).transpose('station', 'depth'))
+
+    #Add distance
+    transect['distance'] = (('station'), fod.distance_from_datum(transect['lat'], transect['lon'], datum))
+
+    #Rename in-situ temperature from 'TEMP' to 'itmp'
+    transect = transect.rename_vars({'TEMP': 'itmp'})
+
+    #Add metadata
+    transect = set_transect_metadata(transect)
+
+    #Clean Dataset
+    transect = clean_CTD_dataset(transect)
+
+    #Calculate the change in pden with distance
+    drdx = transect.swap_dims({'station':'distance'})['pden'].differentiate('distance')/1000 #(kg/m^3)/(km) * 1km/1000m = (kg/m^3)/(m) = kg/m^4
+    drdx = drdx.swap_dims({'distance':'station'}) #Swap coordinates back for contunity
+
+    #Calculate thermal wind (du/dz, 1/s)
+    rho = transect['pden']+1000 #Convert from potential density anamoly to potential density (kg/m^3)
+    thermal_wind = g/transect['fc']/rho*drdx
+    transect['twind'] = thermal_wind.reset_coords('distance', drop=True)
+
+    #Update thermal wind metadata
+    transect['twind'].attrs.update({
+                'units': '1/s',
+                'long_name': 'Thermal Wind',
+                'standard_name': 'thermal_wind',
+            })
+
+    return transect
+
+def set_transect_metadata(ds: xr.Dataset) -> xr.Dataset:
+    '''
+    Set standard CF-convention metadata (units, long_name, standard_name, positive)
+    on common oceanographic variables in a transect/CTD dataset.
+    '''
+
+    metadata = {
+        'depth': {
+            'units': 'm',
+            'long_name': 'Depth',
+            'standard_name': 'depth',
+            'positive': 'down',
+        },
+        'lat': {
+            'units': 'degrees_north',
+            'long_name': 'Latitude',
+            'standard_name': 'latitude',
+        },
+        'lon': {
+            'units': 'degrees_east',
+            'long_name': 'Longitude',
+            'standard_name': 'longitude',
+        },
+        'distance': {
+            'units': 'km',
+            'long_name': 'Distance Along Transect',
+            'standard_name': 'distance',
+        },
+        'pressure': {
+            'units': 'dbar',
+            'long_name': 'Sea Water Pressure',
+            'standard_name': 'sea_water_pressure',
+            'positive': 'down',
+        },
+        'itmp': {
+            'units': 'degC',
+            'long_name': 'In-Situ Temperature',
+            'standard_name': 'sea_water_temperature',
+        },
+        'ptmp': {
+            'units': 'degC',
+            'long_name': 'Potential Temperature',
+            'standard_name': 'sea_water_potential_temperature',
+        },
+        'ctmp': {
+            'units': 'degC',
+            'long_name': 'Conservative Temperature',
+            'standard_name': 'sea_water_conservative_temperature',
+        },
+        'psal': {
+            'units': 'PSU',
+            'long_name': 'Practical Salinity',
+            'standard_name': 'sea_water_practical_salinity',
+        },
+        'asal': {
+            'units': 'g/kg',
+            'long_name': 'Absolute Salinity',
+            'standard_name': 'sea_water_absolute_salinity',
+        },
+        'pden': {
+            'units': 'kg/m^3',
+            'long_name': 'Potential Density',
+            'standard_name': 'sea_water_potential_density',
+        },
+        
+    }
+
+    for var_name, attrs in metadata.items():
+        if var_name in ds.variables:
+            ds[var_name].attrs.update(attrs)
+
+    return ds
+
 
 def clean_CTD_dataset(
         ds: xr.Dataset,
@@ -24,7 +202,7 @@ def clean_CTD_dataset(
         #Filter data north of 70.25N and south of (or on) 71N
         lat_mask = clean_ds['lat'] > min_lat
         deep_data = clean_ds.where(lat_mask, drop = True).sel(depth = clean_ds['depth'] >= min_depth)
-        valid_stations = deep_data.dropna('station', how='all', subset=['TEMP','sal'])['station']
+        valid_stations = deep_data.dropna('station', how='all', subset=['ptmp','psal'])['station']
         north_stations = clean_ds.sel(station = valid_stations)
 
         #Add two steps and add back data south of 71N
@@ -84,3 +262,4 @@ def split_by_coordinate(ds: xr.Dataset,
         split_data[id] = split_ds.sel(**{coordinate: id}).dropna('depth', how='all').dropna('station', how='all')
 
     return split_data
+
