@@ -14,7 +14,6 @@ def plot_custom_section(
         fig: plt.figure,
         ax: plt.axes,
         cmap,
-        cbar_label: str,
         levels = None
         ) -> tuple[plt.Figure, plt.Axes]:
 
@@ -23,9 +22,14 @@ def plot_custom_section(
     '''
     x_mesh, y_mesh = np.meshgrid(ds[x], ds[y])
 
+    cbar_label = f"{ds[data].attrs['long_name']} [{ds[data].attrs['units']}]"
+
     cs = ax.contourf(x_mesh, y_mesh, ds[data].T, cmap = cmap, levels = levels)
     fig.colorbar(cs, ax=ax, label=cbar_label)
     ax.invert_yaxis()
+
+    ax.set_xlabel(f"{ds[x].attrs['long_name']} [{ds[x].attrs['units']}]")
+    ax.set_ylabel(f"{ds[y].attrs['long_name']} [{ds[y].attrs['units']}]")
 
     return fig, ax
 
@@ -138,7 +142,6 @@ def plot_isoline(ax: plt.Axes,
                 linewidth: float = 1,
                 linestyle: str = '--',
                 inline_label: bool = True,
-                fmt: str = '%1.1f'
                 ) -> plt.Axes:
     '''
     Plot a single isoline (contour line) of a given variable at a given value on a
@@ -169,7 +172,79 @@ def plot_isoline(ax: plt.Axes,
                      linewidths=linewidth,
                      linestyles=linestyle)
 
+    units = transect[var].attrs['units']
+    fmt='%1.1f '+units
+
     if inline_label:
         ax.clabel(cs, fmt=fmt, colors=color, fontsize=9)
 
     return ax
+
+
+def plot_transect(
+        transect: xr.Dataset,
+        x: str,
+        y: str,
+        data: str,
+        fig: plt.figure,
+        ax: plt.axes,
+        cmap,
+        title: str,
+        levels = None,
+        cast_locations = True,
+        isohaline = True,
+        seafloor = True,
+        bounds = {
+            'top': 0,
+            'bottom': 700,
+            'left': 0,
+            'right': None
+        },
+        ) -> tuple[plt.Figure, plt.Axes]:
+    
+    fig, ax = plot_custom_section(
+        ds = transect,
+        x = x,
+        y = y,
+        data = data,
+        fig = fig,
+        ax = ax,
+        cmap = cmap,
+        levels = levels
+    )
+
+    ax.set_title(title)
+    ax.set_ylim(top = bounds['top'], bottom=bounds['bottom'])
+    ax.set_xlim(left = bounds['left'], right=bounds['right'])
+
+
+    if cast_locations:
+            fig, ax = plot_cast_locations(
+                locations=transect[x],
+                fig = fig,
+                ax = ax,
+                color = 'r',
+                depth=30,
+                vertical_markers=True
+            )
+    
+    if seafloor:
+        ax = plot_seafloor(
+                ax = ax,
+                transect = transect,
+                x_cord_variable = x,
+                draw_depth=bounds['bottom']
+            )
+
+    if isohaline:
+            ax=plot_isoline(
+                ax = ax,
+                transect = transect,
+                x_cord_variable = x,
+                var = 'psal',
+                value = 34.8,
+            )
+
+    ax.legend()
+
+    return fig, ax
