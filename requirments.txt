@@ -12,3 +12,4 @@ cmocean
 h5netcdf
 netcdf4
 h5py
+gsw
