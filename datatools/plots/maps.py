@@ -2,6 +2,7 @@
 Tools for making various geographic plots related to CTD data
 '''
 
+import numpy as np
 import xarray as xr
 
 import matplotlib.pyplot as plt
@@ -73,6 +74,8 @@ def plot_locations(ax: plt.axes,
     '''
     Plot a set of lat/lon pairs on a map
     '''
+    lat = np.atleast_1d(lat)
+    lon = np.atleast_1d(lon)
 
     for i, (lon_i, lat_i) in enumerate(zip(lon, lat)):
         ax.plot(lon_i, lat_i,
