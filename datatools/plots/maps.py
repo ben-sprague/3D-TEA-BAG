@@ -63,6 +63,8 @@ def plot_station_locations(ax: plt.axes,
                 transform = ccrs.PlateCarree(),
                 label = label if i == 0 else "_nolegend_")
 
+    return ax
+
 def plot_locations(ax: plt.axes, 
                       lat: xr.DataArray,
                       lon: xr.DataArray,
