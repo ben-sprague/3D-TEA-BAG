@@ -141,7 +141,35 @@ class DataServer:
 
                 #TO WRITE
 
-                #For now, just pass new data
+                #For now, print both data values and just pass the new data
+
+                #Print old data
+                query_time = self.__closest_time(working_time, self.sat_ds_old['time'])
+                working_da = self.sat_ds_old.sel(time = query_time) #Get the dataarray of the ds at the time
+                working_points = self.old_points
+
+                dots = working_da['DOT'].values.ravel()
+                us = working_da['U'].values.ravel()
+                vs = working_da['V'].values.ravel()
+                data = np.vstack((dots, us, vs)).T
+                interp = LinearNDInterpolator(working_points, data)
+                working_dot, working_u, working_v = interp(working_lon, working_lat)
+                print(f"Old DOT: {working_dot}m, U: {working_u}m/s, V: {working_v}m/s")
+
+                #Print new data
+                query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
+                working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
+                working_points = self.new_points
+
+                dots = working_da['DOT'].values.ravel()
+                us = working_da['U'].values.ravel()
+                vs = working_da['V'].values.ravel()
+                data = np.vstack((dots, us, vs)).T
+                interp = LinearNDInterpolator(working_points, data)
+                working_dot, working_u, working_v = interp(working_lon, working_lat)
+                print(f"New DOT: {working_dot}m, U: {working_u}m/s, V: {working_v}m/s")
+
+                #pass the new data
                 query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
                 working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
                 working_points = self.new_points
@@ -192,7 +220,7 @@ class DataServer:
             The closest time on the time_grid to the query
         '''
 
-        idx = (np.abs(time_grid-query)).argmin()
+        idx = (np.abs(time_grid-query)).argmin(dim='time ')
 
         closest_time = time_grid[idx]
 
