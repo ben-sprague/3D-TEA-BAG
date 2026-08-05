@@ -91,7 +91,8 @@ class DataServer:
     def get(self, 
         time: np.datetime64, 
         lat: float,
-        lon: float) -> tuple[float, float, float]:
+        lon: float,
+        priority: str) -> tuple[float, float, float]:
 
         '''
         Get the Dynamic Ocean Topgraphy (DOT), U, and V components of the geostrophic current at a specfic time
@@ -104,8 +105,11 @@ class DataServer:
             The latitude of the point to get data for. Data will be interpolared with bilinear 
             interpolation of the datapoint does no fall on the geographic grid
         lon: float
-                The longitude of the point to get data for. Data will be interpolared with bilinear 
-                interpolation of the datapoint does no fall on the geographic grid
+            The longitude of the point to get data for. Data will be interpolared with bilinear 
+            interpolation of the datapoint does no fall on the geographic grid
+        priority: str
+            Whether to return 'old' or 'new' data in the overlap period (accepts 'old' or 'new')
+
 
         Returns:
         --------
@@ -139,40 +143,52 @@ class DataServer:
             elif working_time >= self.overlap_start_time and working_time < self.overlap_end_time:
                 #Requested time is covered by the overlap of the two datasets
 
-                #TO WRITE
+                if priority == 'old':
+                    #Pass on old data
+                    query_time = self.__closest_time(working_time, self.sat_ds_old['time'])
+                    working_da = self.sat_ds_old.sel(time = query_time) #Get the dataarray of the ds at the time
+                    working_points = self.old_points
 
-                #For now, print both data values and just pass the new data
+                elif priority == 'new':
+                    #Pass on new data
+                    query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
+                    working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
+                    working_points = self.new_points
+                else:
+                    raise AttributeError('priority accepts only "old" and "new"')
 
-                #Print old data
-                query_time = self.__closest_time(working_time, self.sat_ds_old['time'])
-                working_da = self.sat_ds_old.sel(time = query_time) #Get the dataarray of the ds at the time
-                working_points = self.old_points
+                # #For now, print both data values and just pass the new data
 
-                dots = working_da['DOT'].values.ravel()
-                us = working_da['U'].values.ravel()
-                vs = working_da['V'].values.ravel()
-                data = np.vstack((dots, us, vs)).T
-                interp = LinearNDInterpolator(working_points, data)
-                working_dot, working_u, working_v = interp(working_lon, working_lat)
-                print(f"Old DOT: {working_dot}m, U: {working_u}m/s, V: {working_v}m/s")
+                # #Print old data
+                # query_time = self.__closest_time(working_time, self.sat_ds_old['time'])
+                # working_da = self.sat_ds_old.sel(time = query_time) #Get the dataarray of the ds at the time
+                # working_points = self.old_points
 
-                #Print new data
-                query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
-                working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
-                working_points = self.new_points
+                # dots = working_da['DOT'].values.ravel()
+                # us = working_da['U'].values.ravel()
+                # vs = working_da['V'].values.ravel()
+                # data = np.vstack((dots, us, vs)).T
+                # interp = LinearNDInterpolator(working_points, data)
+                # working_dot, working_u, working_v = interp(working_lon, working_lat)
+                # print(f"Old DOT: {working_dot}m, U: {working_u}m/s, V: {working_v}m/s")
 
-                dots = working_da['DOT'].values.ravel()
-                us = working_da['U'].values.ravel()
-                vs = working_da['V'].values.ravel()
-                data = np.vstack((dots, us, vs)).T
-                interp = LinearNDInterpolator(working_points, data)
-                working_dot, working_u, working_v = interp(working_lon, working_lat)
-                print(f"New DOT: {working_dot}m, U: {working_u}m/s, V: {working_v}m/s")
+                # #Print new data
+                # query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
+                # working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
+                # working_points = self.new_points
 
-                #pass the new data
-                query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
-                working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
-                working_points = self.new_points
+                # dots = working_da['DOT'].values.ravel()
+                # us = working_da['U'].values.ravel()
+                # vs = working_da['V'].values.ravel()
+                # data = np.vstack((dots, us, vs)).T
+                # interp = LinearNDInterpolator(working_points, data)
+                # working_dot, working_u, working_v = interp(working_lon, working_lat)
+                # print(f"New DOT: {working_dot}m, U: {working_u}m/s, V: {working_v}m/s")
+
+                # #pass the new data
+                # query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
+                # working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
+                # working_points = self.new_points
             elif working_time >= self.overlap_end_time and working_time <= self.end_time:
                 #Requested time is only covered by the new dataset
                 query_time = self.__closest_time(working_time, self.sat_ds_new['time'])
@@ -220,7 +236,7 @@ class DataServer:
             The closest time on the time_grid to the query
         '''
 
-        idx = (np.abs(time_grid-query)).argmin(dim='time ')
+        idx = (np.abs(time_grid-query)).argmin(dim='time')
 
         closest_time = time_grid[idx]
 
