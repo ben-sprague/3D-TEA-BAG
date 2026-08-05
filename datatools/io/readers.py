@@ -3,7 +3,6 @@ Load a netCDF file into a xarray dataset
 '''
 
 import xarray as xr
-
 def readLSSL(path: str) -> xr.Dataset:
     '''
     Read netCDF file containing CTD data collected on cruises on the Canadian Coast Guard Ice Breaker Louis S. St-Laurent
@@ -19,7 +18,7 @@ def readLSSL(path: str) -> xr.Dataset:
     
     return ds
 
-def readDOT(path: str, engine: str = 'h5netcdf') -> xr.Dataset:
+def readDOT(path: str, engine: str = 'h5netcdf', chunks = {'time': 50}) -> xr.Dataset:
     '''
     Read netCDF file containing satelite derived dynamic ocean topography (DOT) data
     from https://www.cpom.ucl.ac.uk/dynamic_topography/index.php
