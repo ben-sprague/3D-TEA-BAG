@@ -61,3 +61,26 @@ def plot_station_locations(ax: plt.axes,
                 linestyle = 'None',
                 transform = ccrs.PlateCarree(),
                 label = label if i == 0 else "_nolegend_")
+
+def plot_locations(ax: plt.axes, 
+                      lat: xr.DataArray,
+                      lon: xr.DataArray,
+                      marker: str = 'o',
+                      markersize: int = 2,
+                      color: str = 'k',
+                      label: str = "_nolegend_"
+                      ) -> plt.Axes:
+    '''
+    Plot a set of lat/lon pairs on a map
+    '''
+
+    for i, (lon_i, lat_i) in enumerate(zip(lon, lat)):
+        ax.plot(lon_i, lat_i,
+                marker=marker,
+                markersize=markersize,
+                color=color,
+                linestyle='None',
+                transform=ccrs.PlateCarree(),
+                label=label if i == 0 else '_nolegend_')
+
+    return ax
