@@ -24,7 +24,19 @@ def plot_custom_section(
 
     cbar_label = f"{ds[data].attrs['long_name']} [{ds[data].attrs['units']}]"
 
-    cs = ax.contourf(x_mesh, y_mesh, ds[data].T, cmap = cmap, levels = levels)
+    levels = np.atleast_1d(levels)
+
+    if levels.size == 2:
+         #Generate levels array based on a min/max value
+         levels = np.linspace(levels[0], levels[1], 9)
+
+    cs = ax.contourf(x_mesh, 
+                     y_mesh, 
+                     ds[data].T, 
+                     cmap = cmap, 
+                     levels = levels,
+                     extend = 'neither')
+
     fig.colorbar(cs, ax=ax, label=cbar_label)
     ax.invert_yaxis()
 
