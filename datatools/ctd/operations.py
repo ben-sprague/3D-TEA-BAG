@@ -258,15 +258,43 @@ def integrate_level_of_no_motion(
         Absolute geostrophic velocity indexed by depth (level of no motion units per second, i.e. m/s)
     '''
 
-    #Integrate from surface to level of no motion
-    shallow_twind_shear = twind_shear.where(twind_shear['depth']<= level_no_motion)
-    shallow_agv = -shallow_twind_shear.integrate(coord='depth')
+    #Split off data that doesn't reach the level of no motion, and integrate up from the bottom
+    mask = twind_shear.sel(depth = level_no_motion, method = 'bfill').isnull().broadcast_like(twind_shear['depth'])
+    shallow_twind_shear = twind_shear.where(mask, drop=True)
+    shallow_agv = xr.full_like(shallow_twind_shear.where(shallow_twind_shear['depth'] <= level_no_motion, drop = True), np.nan)
 
-    #Integrate from level of no motion to bottom
-    deep_twind_shear = twind_shear.where(twind_shear['depth'] > level_no_motion)
-    deep_agv = deep_twind_shear.integrate(coord='depth')
+    #Integrate data from the bottom to the surface
+    for station_id in shallow_twind_shear['station']:
+        #Get valid (ie. not nan) data for that specfic station
+        working_twind_shear = shallow_twind_shear.sel(station = station_id).dropna(dim = 'depth', how = 'all')
 
-    abs_geo_vel = xr.concat((shallow_agv, deep_agv))
+        #Flip array so integration is from bottom to surface
+        working_twind_shear = working_twind_shear.isel(depth=slice(None, None, -1))
+
+        #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
+        working_shallow_agv = working_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
+
+        shallow_agv.loc[{'station': station_id, 'depth': working_shallow_agv['depth']}] = working_shallow_agv
+
+
+    #Take all other data not masked
+    deep_twind_shear = twind_shear.where(~mask, drop=True)
+
+    #Dump off all data deeper than the level of no motion (current there assumed to be zero)
+    deep_twind_shear = deep_twind_shear.where(deep_twind_shear['depth'] <= level_no_motion, drop=True)
+
+    #Flip array so integration is from bottom to surface
+    deep_twind_shear = deep_twind_shear.isel(depth=slice(None, None, -1))
+
+    #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
+    deep_agv = deep_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
+
+    abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station')
+
+    #Add back nan below the level of no motion so array size matches with the rest of the dataset
+    padding = xr.full_like(twind_shear.where(twind_shear['depth'] > level_no_motion, drop=True), np.nan).drop_vars('prs')
+
+    abs_geo_vel = xr.concat((abs_geo_vel, padding), dim = 'depth')
 
     return abs_geo_vel
 
