@@ -80,7 +80,7 @@ def injest_CTD_transect(
                                         pt = transect['ptmp'].broadcast_like(transect['depth']).transpose('station', 'depth'))
 
     #Add distance
-    transect['distance'] = (('station'), fod.distance_from_datum(transect['lat'], transect['lon'], datum))
+    transect['distance'] = (('station'), fod.distance_from_datum(transect['lat'], transect['lon'], datum)[0])
 
     #Rename in-situ temperature from 'TEMP' to 'itmp'
     transect = transect.rename_vars({'TEMP': 'itmp'})
@@ -237,6 +237,39 @@ def clean_CTD_dataset(
     #Return cleaned dataset
     return clean_ds
 
+def integrate_level_of_no_motion(
+        twind_shear: xr.DataArray,
+        level_no_motion: float,
+            ) -> xr.DataArray:
+
+    '''
+    Integrate the absolute geostrophic current based on a level of no motion
+
+    Parameters:
+    -----------
+    twind_shear: xr.DataArray
+        Thermal wind shears (1/s) indexed by depth (same units as level of no motion)
+    level_no_motion
+        Level of no motion (same units as depths)
+    
+    Returns:
+    --------
+    abs_geo_vel: xr.DataArray
+        Absolute geostrophic velocity indexed by depth (level of no motion units per second, i.e. m/s)
+    '''
+
+    #Integrate from surface to level of no motion
+    shallow_twind_shear = twind_shear.where(twind_shear['depth']<= level_no_motion)
+    shallow_agv = -shallow_twind_shear.integrate(coord='depth')
+
+    #Integrate from level of no motion to bottom
+    deep_twind_shear = twind_shear.where(twind_shear['depth'] > level_no_motion)
+    deep_agv = deep_twind_shear.integrate(coord='depth')
+
+    abs_geo_vel = xr.concat((shallow_agv, deep_agv))
+
+    return abs_geo_vel
+
 
 def var_slice(ds: xr.Dataset,
           variable: str,
@@ -262,4 +295,3 @@ def split_by_coordinate(ds: xr.Dataset,
         split_data[id] = split_ds.sel(**{coordinate: id}).dropna('depth', how='all').dropna('station', how='all')
 
     return split_data
-
