@@ -46,12 +46,17 @@ def distance_from_datum(
     datum_lat = datum[0]
     datum_lon = datum[1]
 
+    latitude = np.atleast_2d(latitude)
+    longitude = np.atleast_2d(longitude)
+
     distance = np.full_like(latitude, np.nan)
 
+
     for i in range (latitude.shape[0]):
-        current_lat = latitude[i]
-        current_lon = longitude[i]
-        distance[i] = gsw.distance([datum_lon, current_lon], [datum_lat, current_lat])[0]
+        for j in range (latitude.shape[1]):
+            current_lat = latitude[i, j]
+            current_lon = longitude[i, j]
+            distance[i, j] = gsw.distance([datum_lon, current_lon], [datum_lat, current_lat])[0]
 
 
     distance = distance/1000 #Convert from m to km
