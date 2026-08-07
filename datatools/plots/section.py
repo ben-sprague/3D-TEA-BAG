@@ -26,7 +26,10 @@ def plot_custom_section(
 
     levels = np.atleast_1d(levels)
 
-    if levels.size == 2:
+    if levels.size == 1:
+        #Generate symetric levels array based on a max value only
+        levels = np.linspace(-levels[0], levels[0], 9)
+    elif levels.size == 2:
          #Generate levels array based on a min/max value
          levels = np.linspace(levels[0], levels[1], 9)
 
@@ -35,7 +38,7 @@ def plot_custom_section(
                      ds[data].T, 
                      cmap = cmap, 
                      levels = levels,
-                     extend = 'neither')
+                     extend = 'both')
 
     fig.colorbar(cs, ax=ax, label=cbar_label)
     ax.invert_yaxis()
