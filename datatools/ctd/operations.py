@@ -103,7 +103,7 @@ def injest_CTD_transect(
     #Update thermal wind metadata
     transect['twind'].attrs.update({
                 'units': '1/s',
-                'long_name': 'Thermal Wind',
+                'long_name': 'Thermal Wind Shear',
                 'standard_name': 'thermal_wind',
             })
 
@@ -295,6 +295,14 @@ def integrate_level_of_no_motion(
     padding = xr.full_like(twind_shear.where(twind_shear['depth'] > level_no_motion, drop=True), np.nan).drop_vars('prs')
 
     abs_geo_vel = xr.concat((abs_geo_vel, padding), dim = 'depth')
+
+    #Add metadata to DataArray
+    depth_units = abs_geo_vel['depth'].attrs['units']
+    abs_geo_vel.attrs.update({
+                'units': f"{depth_units}/s",
+                'long_name': 'Absolute Geostrophic Velocity',
+                'standard_name': 'absolute_geostrophic_velocity',
+            })
 
     return abs_geo_vel
 
