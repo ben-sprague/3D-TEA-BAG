@@ -4,8 +4,11 @@ A set of specialty dataset opperations for working with CTD data
 
 import xarray as xr
 import numpy as np
+from numpy import linalg as LA
+
 import ocean_tools as fod
 import gsw
+from ..DOT.DataServer import DataServer
 
 def injest_CTD_transect(
         transect: xr.Dataset,
@@ -237,8 +240,8 @@ def clean_CTD_dataset(
     #Return cleaned dataset
     return clean_ds
 
-def integrate_level_of_no_motion(
-        twind_shear: xr.DataArray,
+def integrate_from_level_of_no_motion(
+        transect: xr.DataArray,
         level_no_motion: float,
             ) -> xr.DataArray:
 
@@ -247,8 +250,8 @@ def integrate_level_of_no_motion(
 
     Parameters:
     -----------
-    twind_shear: xr.DataArray
-        Thermal wind shears (1/s) indexed by depth (same units as level of no motion)
+    transect: xr.Dataset
+        xarray Dataset with thermal wind shears (1/s) indexed by depth (same units as level of no motion)
     level_no_motion
         Level of no motion (same units as depths)
     
@@ -257,6 +260,8 @@ def integrate_level_of_no_motion(
     abs_geo_vel: xr.DataArray
         Absolute geostrophic velocity indexed by depth (level of no motion units per second, i.e. m/s)
     '''
+
+    twind_shear = transect['twind']
 
     #Split off data that doesn't reach the level of no motion, and integrate up from the bottom
     mask = twind_shear.sel(depth = level_no_motion, method = 'bfill').isnull().broadcast_like(twind_shear['depth'])
@@ -306,6 +311,87 @@ def integrate_level_of_no_motion(
 
     return abs_geo_vel
 
+def integrate_from_surface_current(
+        transect: xr.Dataset,
+        sat_data_server: DataServer,
+        transect_dirction: str,
+            ) -> xr.DataArray:
+    '''
+    Integrate the absolute geostrophic current based on a level of no motion
+
+    Parameters:
+    -----------
+    transect: xr.Dataset
+        xarray Dataset with thermal wind shears (1/s) indexed by depth (m)
+    sat_data_server: DataServer
+        Satellite derived surface geostrophic currents
+    transect_direction: str
+            String denoting the direction of the transect (either 'ns' for north-south or 'ew' for east-west)
+    
+    Returns:
+    --------
+    abs_geo_vel: xr.DataArray
+        Absolute geostrophic velocity indexed by depth (m/s)
+    '''
+
+    #Get the vector normal to the transect at each station
+    dlat_dlon = np.gradient(transect['lat'], transect['lon']).reshape((-1,1))
+
+    if transect_dirction == 'ns':
+        #North-south transect
+        norm_vec = np.hstack((dlat_dlon, np.ones_like(dlat_dlon)))
+
+        #For north-south transect, always have normal vector point west (where west is the negative x-direction)
+        mask = norm_vec[:,0] > 0 #All rows where the x-component is greater than zero (ie. pointing east instead of west)
+        norm_vec[mask,:] = -norm_vec[mask,:]
+    elif transect_dirction == 'ew':
+        #East-west transect
+        norm_vec = np.hstack((dlat_dlon, np.ones_like(dlat_dlon)))
+
+        #For east-west transect, always have normal vector point north (where north is the positive y-direction)
+        mask = norm_vec[:,1] < 0 #All rows where the y-component is less than zero (ie. pointing south instead of north)
+        norm_vec[mask,:] = -norm_vec[mask,:]
+
+    unit_norm_vec = norm_vec/(LA.norm(norm_vec, axis=1).reshape((-1,1)))
+
+    #Get the geostrophic surface current at each station
+    _, u_geo_surf_current, v_geo_surf_current = sat_data_server.get(transect['date'], transect['lat'], transect['lon'], priority='old')
+    geo_surf_current_vector = np.column_stack((u_geo_surf_current, v_geo_surf_current)) 
+
+    geo_surf_current_proj = np.sum(geo_surf_current_vector * unit_norm_vec, axis=1)
+
+    #Isolate the thermal wind shear DataArray
+    twind_shear = transect['twind']
+
+    #Split off stations with a missing value at the first depth level
+    mask = twind_shear.sel(depth = twind_shear['depth'][0]).isnull()
+    missing_first_depth_twind_shear = twind_shear.where(mask.broadcast_like(twind_shear['depth']), drop=True)
+    missing_first_depth_surf_current = geo_surf_current_proj[mask].reshape((-1,1))
+
+    #Remove missing first depth level from data
+    missing_first_depth_twind_shear = missing_first_depth_twind_shear.sel(depth = twind_shear['depth'][1:])
+
+    #Integrate data from the surface to the bottom and add the surface current
+    missing_first_depth_agv = missing_first_depth_twind_shear.cumulative_integrate(coord='depth')+missing_first_depth_surf_current
+
+    #Integrate all other stations
+    complete_station_twind_shear = twind_shear.where(~mask.broadcast_like(twind_shear['depth']), drop=True)
+    complete_station_surf_current = geo_surf_current_proj[~mask].reshape((-1,1))
+
+    #Integrate data from the surface to the bottom and add the surface current
+    complete_station_agv = complete_station_twind_shear.cumulative_integrate(coord='depth')+complete_station_surf_current
+
+    abs_geo_vel = xr.concat((missing_first_depth_agv, complete_station_agv), dim='station')
+
+    #Add metadata to DataArray
+    depth_units = abs_geo_vel['depth'].attrs['units']
+    abs_geo_vel.attrs.update({
+                'units': f"{depth_units}/s",
+                'long_name': 'Absolute Geostrophic Velocity',
+                'standard_name': 'absolute_geostrophic_velocity',
+            })
+
+    return abs_geo_vel
 
 def var_slice(ds: xr.Dataset,
           variable: str,
