@@ -104,7 +104,7 @@ def injest_CTD_transect(
     transect['twind'].attrs.update({
                 'units': '1/s',
                 'long_name': 'Thermal Wind Shear',
-                'standard_name': 'thermal_wind',
+                'standard_name': 'thermal_wind_shear',
             })
 
     return transect
