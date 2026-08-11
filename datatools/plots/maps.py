@@ -15,7 +15,7 @@ def setup_map(figure: plt.figure,
               land: bool = True,
               coastline: bool = True,
               gridlines: bool = True
-              ) -> plt.axes:
+              ) -> plt.Axes:
     '''
     Draw basemap into a figure given a predefined map projection
     Returns an axes object
@@ -36,7 +36,6 @@ def setup_map(figure: plt.figure,
         ax.gridlines(draw_labels=True)
 
 
-
     return ax
 
 
@@ -51,7 +50,7 @@ def plot_station_locations(ax: plt.axes,
     Plot the location of CTD cast stations on a basemap
     '''
 
-    for i, cruise_id in enumerate(ds['cruise'].values.tolist()):
+    for i, cruise_id in enumerate(np.atleast_1d(ds['cruise'].values.tolist())):
         #Plot all the stations in each cruise
         subset = ds.sel(cruise = cruise_id)
         ax.plot(subset['lon'], 

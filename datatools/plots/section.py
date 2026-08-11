@@ -14,7 +14,10 @@ def plot_custom_section(
         fig: plt.figure,
         ax: plt.axes,
         cmap,
-        levels = None
+        levels = None,
+        colorbar: bool = True,
+        xlabel: bool = True,
+        ylabel: bool = True,
         ) -> tuple[plt.Figure, plt.Axes]:
 
     '''
@@ -24,14 +27,15 @@ def plot_custom_section(
 
     cbar_label = f"{ds[data].attrs['long_name']} [{ds[data].attrs['units']}]"
 
-    levels = np.atleast_1d(levels)
+    if levels is not None:
+        levels = np.atleast_1d(levels)
 
-    if levels.size == 1:
-        #Generate symetric levels array based on a max value only
-        levels = np.linspace(-levels[0], levels[0], 9)
-    elif levels.size == 2:
-         #Generate levels array based on a min/max value
-         levels = np.linspace(levels[0], levels[1], 9)
+        if levels.size == 1:
+            #Generate symetric levels array based on a max value only
+            levels = np.linspace(-levels[0], levels[0], 9)
+        elif levels.size == 2:
+            #Generate levels array based on a min/max value
+            levels = np.linspace(levels[0], levels[1], 9)
 
     cs = ax.contourf(x_mesh, 
                      y_mesh, 
@@ -40,13 +44,20 @@ def plot_custom_section(
                      levels = levels,
                      extend = 'both')
 
-    fig.colorbar(cs, ax=ax, label=cbar_label)
+    if colorbar:
+        fig.colorbar(cs, ax=ax, label=cbar_label)
+    
     ax.invert_yaxis()
 
-    ax.set_xlabel(f"{ds[x].attrs['long_name']} [{ds[x].attrs['units']}]")
-    ax.set_ylabel(f"{ds[y].attrs['long_name']} [{ds[y].attrs['units']}]")
+    if xlabel:
+        ax.set_xlabel(f"{ds[x].attrs['long_name']} [{ds[x].attrs['units']}]")
+    if ylabel:
+        ax.set_ylabel(f"{ds[y].attrs['long_name']} [{ds[y].attrs['units']}]")
 
-    return fig, ax
+    if colorbar:
+        return fig, ax
+    else:
+        return fig, ax, cs
 
 
 
@@ -215,18 +226,40 @@ def plot_transect(
             'left': 0,
             'right': None
         },
+        colorbar: bool = True,
+        legend: bool = True,
+        xlabel: bool = True,
+        ylabel: bool = True,
         ) -> tuple[plt.Figure, plt.Axes]:
-    
-    fig, ax = plot_custom_section(
-        ds = transect,
-        x = x,
-        y = y,
-        data = data,
-        fig = fig,
-        ax = ax,
-        cmap = cmap,
-        levels = levels
-    )
+
+    if colorbar:
+        fig, ax = plot_custom_section(
+            ds = transect,
+            x = x,
+            y = y,
+            data = data,
+            fig = fig,
+            ax = ax,
+            cmap = cmap,
+            levels = levels,
+            colorbar=colorbar,
+            xlabel = xlabel,
+            ylabel = ylabel
+        )
+    else:
+        fig, ax, cbar_obj = plot_custom_section(
+            ds = transect,
+            x = x,
+            y = y,
+            data = data,
+            fig = fig,
+            ax = ax,
+            cmap = cmap,
+            levels = levels,
+            colorbar=colorbar,
+            xlabel = xlabel,
+            ylabel = ylabel
+        )
 
     ax.set_title(title)
     ax.set_ylim(top = bounds['top'], bottom=bounds['bottom'])
@@ -238,8 +271,8 @@ def plot_transect(
                 locations=transect[x],
                 fig = fig,
                 ax = ax,
-                color = 'r',
-                depth=30,
+                color = 'k',
+                depth=5,
                 vertical_markers=True
             )
     
@@ -259,7 +292,10 @@ def plot_transect(
                 var = 'psal',
                 value = 34.8,
             )
+    if legend:
+        ax.legend()
 
-    ax.legend()
-
-    return fig, ax
+    if colorbar:
+        return fig, ax
+    else:
+        return fig, ax, cbar_obj
