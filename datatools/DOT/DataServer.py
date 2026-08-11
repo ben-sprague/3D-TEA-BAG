@@ -1,3 +1,5 @@
+import warnings
+
 from datetime import datetime
 
 import numpy as np
@@ -196,7 +198,12 @@ class DataServer:
                 working_points = self.new_points
             else:
                 #Requested time is after the end of the merged dataset
-                raise KeyError(f"{working_time} is after the end of the covered timeperiod")
+                warnings.warn(f"{working_time} is after the end of the covered timeperiod")
+
+                #Return data from last point (only a month off from September to October 2025)
+                query_time = self.__closest_time(self.end_time, self.sat_ds_new['time'])
+                working_da = self.sat_ds_new.sel(time = query_time) #Get the dataarray of the ds at the time
+                working_points = self.new_points
 
             #Pack DOT, U, and V values for the working time into one data array for interpolation
             dots = working_da['DOT'].values.ravel()
