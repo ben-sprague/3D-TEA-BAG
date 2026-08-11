@@ -210,7 +210,7 @@ def clean_CTD_dataset(
 
         #Add two steps and add back data south of 71N
         south_data = deep_data = clean_ds.where(clean_ds['lat'] <= min_lat, drop = True)
-        clean_ds = xr.concat([south_data, north_stations], dim='station')
+        clean_ds = xr.concat([south_data, north_stations], dim='station', join="outer")
 
     if dist_filter:
         #Second Step, if two casts are taken within 0.05 (by default) degrees of latitude, discard the shallower cast
@@ -294,12 +294,16 @@ def integrate_from_level_of_no_motion(
     #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
     deep_agv = deep_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
 
-    abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station')
+    abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station', join="outer")
+
+    #Drop prs coordinate if present
+    if 'prs' in abs_geo_vel.coords:
+        abs_geo_vel = abs_geo_vel.drop_vars('prs')
 
     #Add back nan below the level of no motion so array size matches with the rest of the dataset
     padding = xr.full_like(twind_shear.where(twind_shear['depth'] > level_no_motion, drop=True), np.nan).drop_vars('prs')
 
-    abs_geo_vel = xr.concat((abs_geo_vel, padding), dim = 'depth')
+    abs_geo_vel = xr.concat((abs_geo_vel, padding), dim = 'depth', join="outer")
 
     #Add metadata to DataArray
     depth_units = abs_geo_vel['depth'].attrs['units']
@@ -314,7 +318,8 @@ def integrate_from_level_of_no_motion(
 def integrate_from_surface_current(
         transect: xr.Dataset,
         sat_data_server: DataServer,
-        transect_dirction: str,
+        sat_data_priority: str,
+        transect_direction: str,
             ) -> xr.DataArray:
     '''
     Integrate the absolute geostrophic current based on a level of no motion
@@ -325,8 +330,10 @@ def integrate_from_surface_current(
         xarray Dataset with thermal wind shears (1/s) indexed by depth (m)
     sat_data_server: DataServer
         Satellite derived surface geostrophic currents
+    sat_data_priority: str
+        Data priority string to pass through to the satellite DataServer (either 'old' or 'new')
     transect_direction: str
-            String denoting the direction of the transect (either 'ns' for north-south or 'ew' for east-west)
+        String denoting the direction of the transect (either 'ns' for north-south or 'ew' for east-west)
     
     Returns:
     --------
@@ -337,14 +344,14 @@ def integrate_from_surface_current(
     #Get the vector normal to the transect at each station
     dlat_dlon = np.gradient(transect['lat'], transect['lon']).reshape((-1,1))
 
-    if transect_dirction == 'ns':
+    if transect_direction == 'ns':
         #North-south transect
         norm_vec = np.hstack((dlat_dlon, np.ones_like(dlat_dlon)))
 
         #For north-south transect, always have normal vector point west (where west is the negative x-direction)
         mask = norm_vec[:,0] > 0 #All rows where the x-component is greater than zero (ie. pointing east instead of west)
         norm_vec[mask,:] = -norm_vec[mask,:]
-    elif transect_dirction == 'ew':
+    elif transect_direction == 'ew':
         #East-west transect
         norm_vec = np.hstack((dlat_dlon, np.ones_like(dlat_dlon)))
 
@@ -355,7 +362,7 @@ def integrate_from_surface_current(
     unit_norm_vec = norm_vec/(LA.norm(norm_vec, axis=1).reshape((-1,1)))
 
     #Get the geostrophic surface current at each station
-    _, u_geo_surf_current, v_geo_surf_current = sat_data_server.get(transect['date'], transect['lat'], transect['lon'], priority='old')
+    _, u_geo_surf_current, v_geo_surf_current = sat_data_server.get(transect['date'], transect['lat'], transect['lon'], priority=sat_data_priority)
     geo_surf_current_vector = np.column_stack((u_geo_surf_current, v_geo_surf_current)) 
 
     geo_surf_current_proj = np.sum(geo_surf_current_vector * unit_norm_vec, axis=1)
@@ -365,23 +372,52 @@ def integrate_from_surface_current(
 
     #Split off stations with a missing value at the first depth level
     mask = twind_shear.sel(depth = twind_shear['depth'][0]).isnull()
-    missing_first_depth_twind_shear = twind_shear.where(mask.broadcast_like(twind_shear['depth']), drop=True)
-    missing_first_depth_surf_current = geo_surf_current_proj[mask].reshape((-1,1))
+    if mask.any():
+        # #If any stations have a missing value at the first depth level
+        # missing_first_depth_twind_shear = twind_shear.where(mask.broadcast_like(twind_shear['depth']), drop=True)
+        # missing_first_depth_surf_current = geo_surf_current_proj[mask].reshape((-1,1))
 
-    #Remove missing first depth level from data
-    missing_first_depth_twind_shear = missing_first_depth_twind_shear.sel(depth = twind_shear['depth'][1:])
+        # #Remove missing first depth level from data
+        # missing_first_depth_twind_shear = missing_first_depth_twind_shear.sel(depth = twind_shear['depth'][1:])
 
-    #Integrate data from the surface to the bottom and add the surface current
-    missing_first_depth_agv = missing_first_depth_twind_shear.cumulative_integrate(coord='depth')+missing_first_depth_surf_current
+        # #Integrate data from the surface to the bottom and add the surface current
+        # missing_first_depth_agv = missing_first_depth_twind_shear.cumulative_integrate(coord='depth')+missing_first_depth_surf_current
+        
+        #If any stations have a missing value at the first depth level
+        missing_first_depth_twind_shear = twind_shear.where(mask.broadcast_like(twind_shear['depth']), drop=True)
+        missing_first_depth_surf_current = geo_surf_current_proj[mask].reshape((-1,1))
+    
+        missing_first_depth_agv = xr.full_like(missing_first_depth_twind_shear, np.nan)
+    
+        #Integrate data from the first valid value to the bottom
+        for i, station_id in enumerate(missing_first_depth_twind_shear['station']):
+            #Get valid (ie. not nan) data for that specfic station
+            working_twind_shear = missing_first_depth_twind_shear.sel(station = station_id).dropna(dim = 'depth', how = 'all')
+            working_surface_current = missing_first_depth_surf_current[i]
+    
+            #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
+            working_agv = working_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))+working_surface_current
+    
+            missing_first_depth_agv.loc[{'station': station_id, 'depth': working_agv['depth']}] = working_agv
 
-    #Integrate all other stations
-    complete_station_twind_shear = twind_shear.where(~mask.broadcast_like(twind_shear['depth']), drop=True)
-    complete_station_surf_current = geo_surf_current_proj[~mask].reshape((-1,1))
+    if not mask.all():
+        #If any stations don't have a missing value at the first depth level
+        #Integrate all other stations
+        complete_station_twind_shear = twind_shear.where(~mask.broadcast_like(twind_shear['depth']), drop=True)
+        complete_station_surf_current = geo_surf_current_proj[~mask].reshape((-1,1))
 
-    #Integrate data from the surface to the bottom and add the surface current
-    complete_station_agv = complete_station_twind_shear.cumulative_integrate(coord='depth')+complete_station_surf_current
+        #Integrate data from the surface to the bottom and add the surface current
+        complete_station_agv = complete_station_twind_shear.cumulative_integrate(coord='depth')+complete_station_surf_current
 
-    abs_geo_vel = xr.concat((missing_first_depth_agv, complete_station_agv), dim='station')
+    if mask.all():
+        #All stations did not have data at the first depth
+        abs_geo_vel = missing_first_depth_agv
+    elif not mask.any():
+        #All stations had data at the first depth
+        abs_geo_vel = complete_station_agv
+    else:
+        #If there were stations both with and without data at the first depth
+        abs_geo_vel = xr.concat((missing_first_depth_agv, complete_station_agv), dim='station', join="outer")
 
     #Add metadata to DataArray
     depth_units = abs_geo_vel['depth'].attrs['units']
