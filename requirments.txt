@@ -14,3 +14,4 @@ netcdf4
 h5py
 gsw
 ipywidgets
+pyproj
