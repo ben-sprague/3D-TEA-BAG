@@ -4,7 +4,10 @@ A set of specialty dataset opperations for working with CTD data
 
 import xarray as xr
 import numpy as np
+from numpy.typing import ArrayLike
 from numpy import linalg as LA
+from pyproj import Geod
+
 
 import ocean_tools as fod
 import gsw
@@ -12,7 +15,6 @@ from ..DOT.DataServer import DataServer
 
 def injest_CTD_transect(
         transect: xr.Dataset,
-        datum: tuple,
         ) -> xr.Dataset:
 
     '''
@@ -45,8 +47,6 @@ def injest_CTD_transect(
     Parameters
     ----------
     transect : xarray dataset with CTD data
-    datum: lat/lon coordinate of datum from which to calculate distance, Tuple (lat, lon)
-
 
     Returns
     -------
@@ -56,8 +56,16 @@ def injest_CTD_transect(
     #Define constants
     g = 9.81 #m/s^2
 
-    #Sort transect by latitude
-    transect = transect.sortby(transect['lat'])
+    direction = transect.attrs['direction']
+
+    if direction == 'ns':
+        #Sort transect by latitude (from south to north)
+        transect = transect.sortby(transect['lat'])
+    elif direction == 'ew':
+        #Sort transect by latitude (from west to east)
+        transect = transect.sortby(transect['lon'])
+    else:
+        raise ValueError(f"{direction} is not a valid input. Either pass 'ns' or 'ew'")
     
     #Add coriolus parameter as a variable
     transect['fc'] = fod.fc(transect['lat'])
@@ -83,7 +91,9 @@ def injest_CTD_transect(
                                         pt = transect['ptmp'].broadcast_like(transect['depth']).transpose('station', 'depth'))
 
     #Add distance
-    transect['distance'] = (('station'), fod.distance_from_datum(transect['lat'], transect['lon'], datum)[0])
+    distance_along_transect = np.cumsum(gsw.distance(transect['lon'], transect['lat']))/1000 #km
+    distance_along_transect = np.concat((np.array([0]), distance_along_transect)) #Add 0 distance for first point
+    transect['distance'] = (('station'), distance_along_transect)
 
     #Rename in-situ temperature from 'TEMP' to 'itmp'
     transect = transect.rename_vars({'TEMP': 'itmp'})
@@ -200,6 +210,8 @@ def clean_CTD_dataset(
 
     clean_ds = ds
 
+    #TODO: REWRITE TO GENERALIZE
+    
     if depth_filter:
         #First step, by default remove casts shallower than 1100m that are north of 71 degrees north 
         #Filter data north of 70.25N and south of (or on) 71N
@@ -432,13 +444,87 @@ def integrate_from_surface_current(
 def var_slice(ds: xr.Dataset,
           variable: str,
           min_val: float,
-          max_val: float):
+          max_val: float) -> xr.Dataset:
     '''
     Slice a dataset along a variable (rather than a coordinate)
     '''
 
     mask = (ds[variable] >= min_val) & (ds[variable] <= max_val)
     return ds.where(mask, drop=True)
+
+def cross_track_distance(lat1, lon1, lat2, lon2, lat3, lon3):
+    geod = Geod(ellps="WGS84")
+
+    lat3 = np.atleast_1d(np.asarray(lat3, dtype=float))
+    lon3 = np.atleast_1d(np.asarray(lon3, dtype=float))
+    n = lat3.size
+
+    # Distance + bearing from point 1 -> point 2 (the line)
+    az12, _, dist12 = geod.inv(lon1, lat1, lon2, lat2)
+    az12 = float(az12)
+    dist12 = float(dist12)
+
+    # Distance + bearing from point 1 -> each station
+    az13, _, dist13 = geod.inv(
+        np.full(n, lon1), np.full(n, lat1), lon3, lat3
+    )
+    az13 = np.asarray(az13, dtype=float).reshape(lon3.shape)
+    dist13 = np.asarray(dist13, dtype=float).reshape(lon3.shape)
+
+    R = 6371008.8  # mean Earth radius (m)
+    delta13 = dist13 / R
+
+    az12_rad = np.deg2rad(az12)
+    az13_rad = np.deg2rad(az13)
+
+    dxt = np.arcsin(np.sin(delta13) * np.sin(az13_rad - az12_rad)) * R  # shape (n,)
+
+    return dxt, dist12, dist13
+
+def var_slice_line(ds: xr.Dataset,
+          lat1: float,
+          lon1: float,
+          lat2: float,
+          lon2: float,
+          tolerance: float = 1) -> xr.Dataset:
+    '''
+    Slice a dataset along a geographic line (within a certian tolerance)
+
+    Parameters:
+    -----------
+    ds: Dataset
+        xarray Dataset to slice
+    lat1: 
+        Starting latitude
+    lon1: float
+        Starting longitude
+    lat2: float
+        Ending latitude
+    lon2: float
+        Ending longitude
+    tolerance: float
+        Maximum allowable distance from the line to be included in the dataset (km). Default 1km
+        
+    Returns:
+    --------
+    sliced_ds: Dataset
+        xarray Dataset with the only the data along the line
+    '''
+
+
+    lat3 = np.atleast_1d(ds['lat'].values)
+    lon3 = np.atleast_1d(ds['lon'].values)
+
+    dist, _, _ = cross_track_distance(lat1, lon1, lat2, lon2, lat3, lon3)
+
+    dist_da = xr.DataArray(np.abs(dist), dims=['cruise','station'], coords={'cruise': ds['cruise'], 'station': ds['station']})
+
+    mask = dist_da <= tolerance*1e3
+
+    sliced_ds = ds.where(mask, drop=True)
+
+    return sliced_ds
+
 
 def split_by_coordinate(ds: xr.Dataset,
           coordinate: str
@@ -453,3 +539,27 @@ def split_by_coordinate(ds: xr.Dataset,
         split_data[id] = split_ds.sel(**{coordinate: id}).dropna('depth', how='all').dropna('station', how='all')
 
     return split_data
+
+def to_dict_by_cruise(ds: xr.Dataset) -> dict:
+    '''
+    Split n-dimension dataset into an array of datasets of dimension n-1 along a coorinate and injest the data
+    
+    Parameters:
+    -----------
+    ds: Dataset
+        Dataset with data from a single transect over multiple years
+
+    Returns:
+    --------
+    transect_dict: dict
+        Dictonary with keys of cruise years and values of Datasets with the transect data from a single year
+    '''
+
+    #Split data into a dataset per cruise 
+    transect_dict = split_by_coordinate(ds, 'cruise')
+    #Clean each dataset
+    for key in transect_dict:
+        #Clean and injest the transect data (add many new and useful variables)
+        transect_dict[key] = injest_CTD_transect(transect_dict[key])
+
+    return transect_dict
