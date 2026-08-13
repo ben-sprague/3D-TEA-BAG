@@ -7,6 +7,9 @@ import numpy as np
 from numpy.typing import ArrayLike
 from numpy import linalg as LA
 from pyproj import Geod
+from scipy.spatial import cKDTree
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 
 
 import ocean_tools as fod
@@ -102,7 +105,7 @@ def injest_CTD_transect(
     transect = set_transect_metadata(transect)
 
     #Clean Dataset
-    transect = clean_CTD_dataset(transect)
+    # transect = clean_CTD_dataset(transect)
 
     #Calculate the change in pden with distance
     drdx = transect.swap_dims({'station':'distance'})['pden'].differentiate('distance')/1000 #(kg/m^3)/(km) * 1km/1000m = (kg/m^3)/(m) = kg/m^4
@@ -200,7 +203,7 @@ def clean_CTD_dataset(
         ds: xr.Dataset,
         min_depth: int = 1100,
         min_lat: float = 71,
-        min_dist: float = 0.05,
+        distance_threshold: float = 5,
         depth_filter: bool = True,
         dist_filter: bool = True,
         ) -> xr.Dataset:
@@ -211,27 +214,52 @@ def clean_CTD_dataset(
     clean_ds = ds
 
     #TODO: REWRITE TO GENERALIZE
-    
-    if depth_filter:
-        #First step, by default remove casts shallower than 1100m that are north of 71 degrees north 
-        #Filter data north of 70.25N and south of (or on) 71N
-        lat_mask = clean_ds['lat'] > min_lat
-        deep_data = clean_ds.where(lat_mask, drop = True).sel(depth = clean_ds['depth'] >= min_depth)
-        valid_stations = deep_data.dropna('station', how='all', subset=['ptmp','psal'])['station']
-        north_stations = clean_ds.sel(station = valid_stations)
 
-        #Add two steps and add back data south of 71N
-        south_data = deep_data = clean_ds.where(clean_ds['lat'] <= min_lat, drop = True)
-        clean_ds = xr.concat([south_data, north_stations], dim='station', join="outer")
+    # if depth_filter:
+    #     #First step, by default remove casts shallower than 1100m that are north of 71 degrees north 
+    #     #Filter data north of 70.25N and south of (or on) 71N
+    #     lat_mask = clean_ds['lat'] > min_lat
+    #     deep_data = clean_ds.where(lat_mask, drop = True).sel(depth = clean_ds['depth'] >= min_depth)
+    #     valid_stations = deep_data.dropna('station', how='all', subset=['ptmp','psal'])['station']
+    #     north_stations = clean_ds.sel(station = valid_stations)
+
+    #     #Add two steps and add back data south of 71N
+    #     south_data = deep_data = clean_ds.where(clean_ds['lat'] <= min_lat, drop = True)
+    #     clean_ds = xr.concat([south_data, north_stations], dim='station', join="outer")
 
     if dist_filter:
-        #Second Step, if two casts are taken within 0.05 (by default) degrees of latitude, discard the shallower cast
+        #Second Step, if multiple casts are taken within 5km (by default), discard all but the deepest cast
+
+
+        #Find clumps of nearby stations
+        coords = clean_ds['distance']
+        n = coords.size
+        tree = cKDTree(coords.values.reshape(-1, 1))
+        pairs = tree.query_pairs(r=distance_threshold)
+
+        rows, cols = zip(*pairs) if pairs else ([], [])
+        adjacency = csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
+
+        n_clumps, labels = connected_components(adjacency, directed=False)
+
+        # Group into clumps
+        clumps = [[] for _ in range(n_clumps)]
+        for i, label in enumerate(labels):
+            clumps[label].append(clean_ds['lat'].values[i])
+
+        clumps = list(c for c in clumps if len(c) > 1)
+
+        #Iterate over clumps and find the station numbers that aren't the deepest in each clump
+
+        #Add those stations to the stations_to_drop list
 
         stations_to_drop = []
 
         for i in range(clean_ds['station'].size - 1):
             current_lat = clean_ds['lat'][i]
             next_lat = clean_ds['lat'][i + 1]
+
+
 
             if np.abs(current_lat - next_lat) < min_dist:
                 # Casts are close together — compare their max valid depth
@@ -245,7 +273,6 @@ def clean_CTD_dataset(
                     stations_to_drop.append(current_station)
                 else:
                     stations_to_drop.append(next_station)
-
         clean_ds = clean_ds.drop_sel(station=stations_to_drop)
             
 
