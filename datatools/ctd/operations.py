@@ -7,6 +7,9 @@ import numpy as np
 from numpy.typing import ArrayLike
 from numpy import linalg as LA
 from pyproj import Geod
+from scipy.spatial import cKDTree
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import connected_components
 
 
 import ocean_tools as fod
@@ -198,55 +201,56 @@ def set_transect_metadata(ds: xr.Dataset) -> xr.Dataset:
 
 def clean_CTD_dataset(
         ds: xr.Dataset,
-        min_depth: int = 1100,
-        min_lat: float = 71,
-        min_dist: float = 0.05,
-        depth_filter: bool = True,
-        dist_filter: bool = True,
+        distance_threshold: float = 10,
         ) -> xr.Dataset:
     '''
     Clean CTD dataset in various ways and return the cleaned dataset
+
+    Parameters:
+    -----------
+    ds: Dataset
+        Input Dataset with data from one cruise year
+    distance_threshold: float
+        How close a cast must be to be considered part of a "clump" of casts when applying the distance filter.
+        Default 10km
+
+    Returns:
+    --------
+    clean_ds: Dataset:
+        The cleaned dataset
     '''
 
     clean_ds = ds
-
-    #TODO: REWRITE TO GENERALIZE
+    #If multiple casts are taken within 5km (by default), discard all but the deepest cast
     
-    if depth_filter:
-        #First step, by default remove casts shallower than 1100m that are north of 71 degrees north 
-        #Filter data north of 70.25N and south of (or on) 71N
-        lat_mask = clean_ds['lat'] > min_lat
-        deep_data = clean_ds.where(lat_mask, drop = True).sel(depth = clean_ds['depth'] >= min_depth)
-        valid_stations = deep_data.dropna('station', how='all', subset=['ptmp','psal'])['station']
-        north_stations = clean_ds.sel(station = valid_stations)
+    stations_to_drop = np.ndarray(shape=(0,))
 
-        #Add two steps and add back data south of 71N
-        south_data = deep_data = clean_ds.where(clean_ds['lat'] <= min_lat, drop = True)
-        clean_ds = xr.concat([south_data, north_stations], dim='station', join="outer")
+    #Find clumps of nearby stations
+    coords = ds['distance']
+    n = coords.size
 
-    if dist_filter:
-        #Second Step, if two casts are taken within 0.05 (by default) degrees of latitude, discard the shallower cast
+    #Build a KD tree with the distances along the transect
+    tree = cKDTree(coords.values.reshape(-1, 1))
 
-        stations_to_drop = []
+    #Find parts of casts that are withing the distance threshold of each other
+    pairs = tree.query_pairs(r=distance_threshold)
+    rows, cols = zip(*pairs) if pairs else ([], [])
 
-        for i in range(clean_ds['station'].size - 1):
-            current_lat = clean_ds['lat'][i]
-            next_lat = clean_ds['lat'][i + 1]
+    #Create an sparese row matrix of pairs and find the connected pairs
+    adjacency = csr_matrix((np.ones(len(rows)), (rows, cols)), shape=(n, n))
+    n_clumps, labels = connected_components(adjacency, directed=False)
 
-            if np.abs(current_lat - next_lat) < min_dist:
-                # Casts are close together — compare their max valid depth
-                current_station = clean_ds['station'][i].item()
-                next_station = clean_ds['station'][i + 1].item()
+    # Group into clumps
+    clumps = [[] for _ in range(n_clumps)]
+    for i, label in enumerate(labels):
+        clumps[label].append(ds['station'].values[i])
+    clumps = list(c for c in clumps if len(c) > 1)
 
-                current_depth = clean_ds.isel(station=i).dropna('depth')['depth'].max()
-                next_depth = clean_ds.isel(station=i + 1).dropna('depth')['depth'].max()
-
-                if current_depth < next_depth:
-                    stations_to_drop.append(current_station)
-                else:
-                    stations_to_drop.append(next_station)
-
-        clean_ds = clean_ds.drop_sel(station=stations_to_drop)
+    #Discard all but the deepest cast in each clump
+    for clump in clumps:
+        max_depths = np.array([ds.sel(station = n).dropna(dim = 'depth', how = 'all')['depth'].max().values for n in clump])
+        stations_to_drop = np.concat((stations_to_drop, np.delete(clump, max_depths.argmax())))
+    clean_ds = clean_ds.drop_sel(station=stations_to_drop)
             
 
     #Return cleaned dataset

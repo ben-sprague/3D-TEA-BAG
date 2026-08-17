@@ -124,7 +124,15 @@ def plot_seafloor(
     verticies = []
     last_depth = None
 
-    for station_id in transect['station']:
+    stations = transect['station'].values
+
+    #On East-West transects, depths decrease as longitude increases
+    #So flip order of processing to correctly draw the seafloor because the algorythm assumes the depth increases
+
+    if transect.attrs['direction'] == 'ew':
+        stations = np.flip(stations)
+
+    for station_id in stations:
         #Get the x coordinate of the current station
         x_cord = transect.sel(station = station_id)[x_cord_variable].item()
 
