@@ -15,6 +15,9 @@ def readLSSL(path: str) -> xr.Dataset:
         path, 
         chunks = {'cruise': 1,'station': 53},
         engine="h5netcdf")
+
+    #Convert longitude scale from 0˚-360˚ to -180˚-180˚
+    ds['lon'] = (ds['lon'] + 180) % 360 - 180
     
     return ds
 

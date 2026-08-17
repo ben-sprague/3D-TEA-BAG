@@ -297,7 +297,7 @@ def plot_transect(
                 ax = ax,
                 transect = transect,
                 x_cord_variable = x,
-                var = 'psal',
+                var = 'SP',
                 value = 34.8,
             )
     if legend:

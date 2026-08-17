@@ -24,25 +24,21 @@ def injest_CTD_transect(
     Sorts data by latitude, convert/calculate various values in a CTD transect for use in later calculations, relabel variables for uniformity, and add metadata to variables and coordinates for easy plotting. 
     By default, the following calculations/conversions are preformed:
     - Calculate coriolus parameter (fc)
-    - Calculate absolute salinity (asal)
-    - Calculate conservative temperature (ctmp)
+    - Calculate pressure (pressure)
+    - Calculate practical salinity (SP)
+    - Calculate potential temperature (PT)
     - Calculate distance along the transect based on a datum (distance)
     - Calculate the thermal wind field (m/s)
-
-    By default, the following variables are relables:
-    - Rename practical salinity (psal)
-    - Rename in-situ temperature (itmp)
-
     By default, metadata is added to the following variables/dimentions:
     - depth
+    - pressure
     - lat
     - lon
     - distance
-    - itmp
-    - ptmp
-    - ctmp
-    - psal
-    - asal
+    - pt
+    - CT
+    - SP
+    - SA
     - pden
     - twind
 
@@ -78,28 +74,22 @@ def injest_CTD_transect(
         z = -np.asarray(transect['depth'].broadcast_like(transect['lat']).transpose('station', 'depth')),
         lat = transect['lat'].broadcast_like(transect['depth']).transpose('station', 'depth'))
 
-    #Rename practical salinity from 'sal' to 'psal'
-    transect = transect.rename_vars({'sal': 'psal'})
-
     #Calculate practical salinity from absolute salinity
-    transect['asal'] = gsw.SA_from_SP(
-        SP = transect['psal'].broadcast_like(transect['depth']).transpose('station', 'depth'),
+    transect['SP'] = gsw.SP_from_SA(
+        SA = transect['SA'].broadcast_like(transect['depth']).transpose('station', 'depth'),
         p = pressure,
         lat = transect['lat'].broadcast_like(transect['depth']).transpose('station', 'depth'),
         lon = transect['lon'].broadcast_like(transect['depth']).transpose('station', 'depth')
     )
 
-    #Convert potential temperature to conservative temperature
-    transect['ctmp'] = gsw.CT_from_pt(SA = transect['asal'].broadcast_like(transect['depth']).transpose('station', 'depth'),
-                                        pt = transect['ptmp'].broadcast_like(transect['depth']).transpose('station', 'depth'))
+    #Calculate potential temperature from conservative temperature
+    transect['pt'] = gsw.pt_from_CT(SA = transect['SA'].broadcast_like(transect['depth']).transpose('station', 'depth'),
+                                        CT = transect['CT'].broadcast_like(transect['depth']).transpose('station', 'depth'))
 
     #Add distance
     distance_along_transect = np.cumsum(gsw.distance(transect['lon'], transect['lat']))/1000 #km
     distance_along_transect = np.concat((np.array([0]), distance_along_transect)) #Add 0 distance for first point
     transect['distance'] = (('station'), distance_along_transect)
-
-    #Rename in-situ temperature from 'TEMP' to 'itmp'
-    transect = transect.rename_vars({'TEMP': 'itmp'})
 
     #Add metadata
     transect = set_transect_metadata(transect)
@@ -159,34 +149,29 @@ def set_transect_metadata(ds: xr.Dataset) -> xr.Dataset:
             'standard_name': 'sea_water_pressure',
             'positive': 'down',
         },
-        'itmp': {
-            'units': 'degC',
-            'long_name': 'In-Situ Temperature',
-            'standard_name': 'sea_water_temperature',
-        },
-        'ptmp': {
+        'pt': {
             'units': 'degC',
             'long_name': 'Potential Temperature',
             'standard_name': 'sea_water_potential_temperature',
         },
-        'ctmp': {
+        'CT': {
             'units': 'degC',
             'long_name': 'Conservative Temperature',
             'standard_name': 'sea_water_conservative_temperature',
         },
-        'psal': {
+        'SP': {
             'units': 'PSU',
             'long_name': 'Practical Salinity',
             'standard_name': 'sea_water_practical_salinity',
         },
-        'asal': {
+        'SA': {
             'units': 'g/kg',
             'long_name': 'Absolute Salinity',
             'standard_name': 'sea_water_absolute_salinity',
         },
         'pden': {
             'units': 'kg/m^3',
-            'long_name': 'Potential Density',
+            'long_name': 'Potential Density Anomaly',
             'standard_name': 'sea_water_potential_density',
         },
         
@@ -312,12 +297,8 @@ def integrate_from_level_of_no_motion(
 
     abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station', join="outer")
 
-    #Drop prs coordinate if present
-    if 'prs' in abs_geo_vel.coords:
-        abs_geo_vel = abs_geo_vel.drop_vars('prs')
-
     #Add back nan below the level of no motion so array size matches with the rest of the dataset
-    padding = xr.full_like(twind_shear.where(twind_shear['depth'] > level_no_motion, drop=True), np.nan).drop_vars('prs')
+    padding = xr.full_like(twind_shear.where(twind_shear['depth'] > level_no_motion, drop=True), np.nan)
 
     abs_geo_vel = xr.concat((abs_geo_vel, padding), dim = 'depth', join="outer")
 
