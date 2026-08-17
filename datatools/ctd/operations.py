@@ -312,12 +312,8 @@ def integrate_from_level_of_no_motion(
 
     abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station', join="outer")
 
-    #Drop prs coordinate if present
-    if 'prs' in abs_geo_vel.coords:
-        abs_geo_vel = abs_geo_vel.drop_vars('prs')
-
     #Add back nan below the level of no motion so array size matches with the rest of the dataset
-    padding = xr.full_like(twind_shear.where(twind_shear['depth'] > level_no_motion, drop=True), np.nan).drop_vars('prs')
+    padding = xr.full_like(twind_shear.where(twind_shear['depth'] > level_no_motion, drop=True), np.nan)
 
     abs_geo_vel = xr.concat((abs_geo_vel, padding), dim = 'depth', join="outer")
 
