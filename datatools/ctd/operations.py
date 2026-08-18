@@ -206,12 +206,34 @@ def clean_CTD_dataset(
     '''
 
     clean_ds = ds
-    #If multiple casts are taken within 5km (by default), discard all but the deepest cast
+    stations_to_drop = []
+    #First apply a depth minimum for all casts a certian distance offshore
+    if (dir := clean_ds.attrs['direction']) == 'ns':
+        #For north south, discard all casts shallower than 1100m that are more than 100km offshore
+        min_distance = 100 #km
+        min_depth = 1100 #m
+        for station_id in clean_ds['station']:
+            distance = (working_station := clean_ds.sel(station = station_id))['distance']
+            cast_depth = working_station.dropna(dim = 'depth', how = 'all')['depth'].max()
+            if cast_depth < min_depth and distance > min_distance:
+                stations_to_drop.append(station_id)
+    elif dir == 'ew':
+        #For north south, discard all casts shallower than 400m regardless of distance (because there is no point with bathymetry shallower than 400m)
+        min_depth = 1100 #m
+        for station_id in clean_ds['station']:
+            distance = (working_station := clean_ds.sel(station = station_id))['distance']
+            cast_depth = working_station.dropna(dim = 'depth', how = 'all')['depth'].max()
+            if cast_depth < min_depth:
+                stations_to_drop.append(station_id)
+
+    clean_ds = clean_ds.drop_sel(station = stations_to_drop)
+
+    #Second, If multiple casts are taken within 5km (by default), discard all but the deepest cast
     
     stations_to_drop = np.ndarray(shape=(0,))
 
     #Find clumps of nearby stations
-    coords = ds['distance']
+    coords = clean_ds['distance']
     n = coords.size
 
     #Build a KD tree with the distances along the transect
@@ -228,12 +250,12 @@ def clean_CTD_dataset(
     # Group into clumps
     clumps = [[] for _ in range(n_clumps)]
     for i, label in enumerate(labels):
-        clumps[label].append(ds['station'].values[i])
+        clumps[label].append(clean_ds['station'].values[i])
     clumps = list(c for c in clumps if len(c) > 1)
 
     #Discard all but the deepest cast in each clump
     for clump in clumps:
-        max_depths = np.array([ds.sel(station = n).dropna(dim = 'depth', how = 'all')['depth'].max().values for n in clump])
+        max_depths = np.array([clean_ds.sel(station = n).dropna(dim = 'depth', how = 'all')['depth'].max().values for n in clump])
         stations_to_drop = np.concat((stations_to_drop, np.delete(clump, max_depths.argmax())))
     clean_ds = clean_ds.drop_sel(station=stations_to_drop)
             
