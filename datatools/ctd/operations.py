@@ -547,7 +547,20 @@ def split_by_coordinate(ds: xr.Dataset,
 
     return split_data
 
-def to_dict_by_cruise(ds: xr.Dataset) -> dict:
+def zip_by_coordinate(da_dict: dict,
+          coordinate: str
+          ) -> xr.Dataset:
+    '''
+    Zip dictonary of dataarrays of dimension n-1 along a coorinate into a n-dimension dataset
+    '''
+
+    da_to_combine = list(da_dict[key] for key in da_dict.keys())
+
+    comb_ds = xr.concat(da_to_combine, dim=coordinate, join = 'outer')
+
+    return comb_ds
+
+def to_dict_by_cruise(ds: xr.Dataset, process:bool = True) -> dict:
     '''
     Split n-dimension dataset into an array of datasets of dimension n-1 along a coorinate and injest the data
     
@@ -555,6 +568,8 @@ def to_dict_by_cruise(ds: xr.Dataset) -> dict:
     -----------
     ds: Dataset
         Dataset with data from a single transect over multiple years
+    process: bool
+        Should the CTD data be processed beyond splitting it into a dictonary by cruise year (default True)
 
     Returns:
     --------
@@ -564,9 +579,10 @@ def to_dict_by_cruise(ds: xr.Dataset) -> dict:
 
     #Split data into a dataset per cruise 
     transect_dict = split_by_coordinate(ds, 'cruise')
-    #Clean each dataset
-    for key in transect_dict:
-        #Clean and injest the transect data (add many new and useful variables)
-        transect_dict[key] = injest_CTD_transect(transect_dict[key])
+    if process:
+        #Clean each dataset
+        for key in transect_dict:
+            #Clean and injest the transect data (add many new and useful variables)
+            transect_dict[key] = injest_CTD_transect(transect_dict[key])
 
     return transect_dict
