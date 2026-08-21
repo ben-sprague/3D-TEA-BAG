@@ -304,6 +304,8 @@ def integrate_from_level_of_no_motion(
     mask = twind_shear.sel(depth = level_no_motion, method = 'bfill').isnull().broadcast_like(twind_shear['depth'])
     shallow_twind_shear = twind_shear.where(mask, drop=True)
     shallow_agv = xr.full_like(shallow_twind_shear.where(shallow_twind_shear['depth'] <= level_no_motion, drop = True), np.nan)
+    deep_twind_shear = twind_shear.where(~mask, drop=True)
+    deep_agv = xr.full_like(deep_twind_shear, np.nan)
 
     #Integrate data from the bottom to the surface
     for station_id in shallow_twind_shear['station']:
@@ -318,19 +320,18 @@ def integrate_from_level_of_no_motion(
 
         shallow_agv.loc[{'station': station_id, 'depth': working_shallow_agv['depth']}] = working_shallow_agv
 
+    if ~mask.all():
+        #Take all other data not masked
+        deep_twind_shear = twind_shear.where(~mask, drop=True)
 
-    #Take all other data not masked
-    deep_twind_shear = twind_shear.where(~mask, drop=True)
+        #Dump off all data deeper than the level of no motion (current there assumed to be zero)
+        deep_twind_shear = deep_twind_shear.where(deep_twind_shear['depth'] <= level_no_motion, drop=True)
 
-    #Dump off all data deeper than the level of no motion (current there assumed to be zero)
-    deep_twind_shear = deep_twind_shear.where(deep_twind_shear['depth'] <= level_no_motion, drop=True)
+        #Flip array so integration is from bottom to surface
+        deep_twind_shear = deep_twind_shear.isel(depth=slice(None, None, -1))
 
-    #Flip array so integration is from bottom to surface
-    deep_twind_shear = deep_twind_shear.isel(depth=slice(None, None, -1))
-
-    #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
-    print(deep_twind_shear)
-    deep_agv = deep_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
+        #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
+        deep_agv = deep_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
 
     abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station', join="outer")
 
