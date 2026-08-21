@@ -44,6 +44,7 @@ def plot_station_locations(ax: plt.axes,
                       marker: str = 'o',
                       markersize: int = 2,
                       color: str = 'k',
+                      alpha: float = 1,
                       label: str = "_nolegend_"
                       ):
     '''
@@ -60,6 +61,7 @@ def plot_station_locations(ax: plt.axes,
                 color = color,
                 linestyle = 'None',
                 transform = ccrs.PlateCarree(),
+                alpha = alpha,
                 label = label if i == 0 else "_nolegend_")
 
     return ax
@@ -70,6 +72,7 @@ def plot_locations(ax: plt.axes,
                       marker: str = 'o',
                       markersize: int = 2,
                       color: str = 'k',
+                      alpha: float = 1,
                       label: str = "_nolegend_"
                       ) -> plt.Axes:
     '''
@@ -85,6 +88,7 @@ def plot_locations(ax: plt.axes,
                 color=color,
                 linestyle='None',
                 transform=ccrs.PlateCarree(),
+                alpha = alpha,
                 label=label if i == 0 else '_nolegend_')
 
     return ax

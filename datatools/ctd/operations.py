@@ -18,6 +18,7 @@ from ..DOT.DataServer import DataServer
 
 def injest_CTD_transect(
         transect: xr.Dataset,
+        datum: tuple,
         ) -> xr.Dataset:
 
     '''
@@ -46,6 +47,8 @@ def injest_CTD_transect(
     Parameters
     ----------
     transect : xarray dataset with CTD data
+    datum: tuple,
+        Coordinates of datum from which to start distance calculations (lat,lon)
 
     Returns
     -------
@@ -54,6 +57,9 @@ def injest_CTD_transect(
 
     #Define constants
     g = 9.81 #m/s^2
+
+    #Extract datum lat/lon
+    datum_lat, datum_lon = datum
 
     direction = transect.attrs['direction']
 
@@ -70,9 +76,7 @@ def injest_CTD_transect(
     transect['fc'] = fod.fc(transect['lat'])
 
     #Calculate sea pressure from depth (but do not store in dataset)
-    pressure = gsw.p_from_z(
-        z = -np.asarray(transect['depth'].broadcast_like(transect['lat']).transpose('station', 'depth')),
-        lat = transect['lat'].broadcast_like(transect['depth']).transpose('station', 'depth'))
+    pressure = transect['prs']
 
     #Calculate practical salinity from absolute salinity
     transect['SP'] = gsw.SP_from_SA(
@@ -87,9 +91,15 @@ def injest_CTD_transect(
                                         CT = transect['CT'].broadcast_like(transect['depth']).transpose('station', 'depth'))
 
     #Add distance
+    #Calculate distance along the transect (measured from the first point in the transect)
     distance_along_transect = np.cumsum(gsw.distance(transect['lon'], transect['lat']))/1000 #km
     distance_along_transect = np.concat((np.array([0]), distance_along_transect)) #Add 0 distance for first point
-    transect['distance'] = (('station'), distance_along_transect)
+
+    #Add in the distance from the datum to the begining of the transect
+    datum_to_transect_distance = gsw.distance([datum_lon, transect['lon'][0]], [datum_lat, transect['lat'][0]])/1000
+    absolute_distance = distance_along_transect + datum_to_transect_distance
+
+    transect['distance'] = (('station'), absolute_distance)
 
     #Add metadata
     transect = set_transect_metadata(transect)
@@ -211,17 +221,19 @@ def clean_CTD_dataset(
     if (dir := clean_ds.attrs['direction']) == 'ns':
         #For north south, discard all casts shallower than 1100m that are more than 100km offshore
         min_distance = 100 #km
-        min_depth = 1100 #m
+        min_depth = 600 #m
         for station_id in clean_ds['station']:
             distance = (working_station := clean_ds.sel(station = station_id))['distance']
+            working_station = working_station[['SA', 'CT', 'pden']] #Only filter out casts that lack the three main measurments below 600m
             cast_depth = working_station.dropna(dim = 'depth', how = 'all')['depth'].max()
             if cast_depth < min_depth and distance > min_distance:
                 stations_to_drop.append(station_id)
     elif dir == 'ew':
         #For north south, discard all casts shallower than 400m regardless of distance (because there is no point with bathymetry shallower than 400m)
-        min_depth = 1100 #m
+        min_depth = 600 #m
         for station_id in clean_ds['station']:
             distance = (working_station := clean_ds.sel(station = station_id))['distance']
+            working_station = working_station[['SA', 'CT', 'pden']] #Only filter out casts that lack the three main measurments below 600m
             cast_depth = working_station.dropna(dim = 'depth', how = 'all')['depth'].max()
             if cast_depth < min_depth:
                 stations_to_drop.append(station_id)
@@ -284,12 +296,37 @@ def integrate_from_level_of_no_motion(
         Absolute geostrophic velocity indexed by depth (level of no motion units per second, i.e. m/s)
     '''
 
+    #First apply a depth minimum for all casts a certian distance offshore
+    stations_to_drop = []
+    if (dir := transect.attrs['direction']) == 'ns':
+        #For north south, discard all casts shallower than the level of no motion that are more than 100km offshore
+        min_distance = 100 #km
+        min_depth = level_no_motion #m
+        for station_id in transect['station']:
+            distance = (working_station := transect.sel(station = station_id))['distance']
+            working_station = working_station['twind'] #Only filter out casts that lack the three main measurments below 600m
+            cast_depth = working_station.dropna(dim = 'depth', how = 'all')['depth'].max()
+            if cast_depth < min_depth and distance > min_distance:
+                stations_to_drop.append(station_id)
+    elif dir == 'ew':
+        #For north south, discard all casts shallower than the level of no motion regardless of distance (because there is no point with bathymetry shallower than 400m)
+        min_depth = level_no_motion #m
+        for station_id in transect['station']:
+            distance = (working_station := transect.sel(station = station_id))['distance']
+            working_station = working_station['twind'] #Only filter out casts that lack the three main measurments below 600m
+            cast_depth = working_station.dropna(dim = 'depth', how = 'all')['depth'].max()
+            if cast_depth < min_depth:
+                stations_to_drop.append(station_id)
+    transect = transect.drop_sel(station = stations_to_drop)
+    
     twind_shear = transect['twind']
 
     #Split off data that doesn't reach the level of no motion, and integrate up from the bottom
     mask = twind_shear.sel(depth = level_no_motion, method = 'bfill').isnull().broadcast_like(twind_shear['depth'])
     shallow_twind_shear = twind_shear.where(mask, drop=True)
     shallow_agv = xr.full_like(shallow_twind_shear.where(shallow_twind_shear['depth'] <= level_no_motion, drop = True), np.nan)
+    deep_twind_shear = twind_shear.where(~mask, drop=True)
+    deep_agv = xr.full_like(deep_twind_shear, np.nan)
 
     #Integrate data from the bottom to the surface
     for station_id in shallow_twind_shear['station']:
@@ -304,18 +341,18 @@ def integrate_from_level_of_no_motion(
 
         shallow_agv.loc[{'station': station_id, 'depth': working_shallow_agv['depth']}] = working_shallow_agv
 
+    if ~mask.all():
+        #Take all other data not masked
+        deep_twind_shear = twind_shear.where(~mask, drop=True)
 
-    #Take all other data not masked
-    deep_twind_shear = twind_shear.where(~mask, drop=True)
+        #Dump off all data deeper than the level of no motion (current there assumed to be zero)
+        deep_twind_shear = deep_twind_shear.where(deep_twind_shear['depth'] <= level_no_motion, drop=True)
 
-    #Dump off all data deeper than the level of no motion (current there assumed to be zero)
-    deep_twind_shear = deep_twind_shear.where(deep_twind_shear['depth'] <= level_no_motion, drop=True)
+        #Flip array so integration is from bottom to surface
+        deep_twind_shear = deep_twind_shear.isel(depth=slice(None, None, -1))
 
-    #Flip array so integration is from bottom to surface
-    deep_twind_shear = deep_twind_shear.isel(depth=slice(None, None, -1))
-
-    #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
-    deep_agv = deep_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
+        #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
+        deep_agv = deep_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
 
     abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station', join="outer")
 
@@ -547,7 +584,20 @@ def split_by_coordinate(ds: xr.Dataset,
 
     return split_data
 
-def to_dict_by_cruise(ds: xr.Dataset) -> dict:
+def zip_by_coordinate(da_dict: dict,
+          coordinate: str
+          ) -> xr.Dataset:
+    '''
+    Zip dictonary of dataarrays of dimension n-1 along a coorinate into a n-dimension dataset
+    '''
+
+    da_to_combine = list(da_dict[key] for key in da_dict.keys())
+
+    comb_ds = xr.concat(da_to_combine, dim=coordinate, join = 'outer')
+
+    return comb_ds
+
+def to_dict_by_cruise(ds: xr.Dataset, datum: tuple = None, process:bool = True) -> dict:
     '''
     Split n-dimension dataset into an array of datasets of dimension n-1 along a coorinate and injest the data
     
@@ -555,6 +605,10 @@ def to_dict_by_cruise(ds: xr.Dataset) -> dict:
     -----------
     ds: Dataset
         Dataset with data from a single transect over multiple years
+    datum: tuple,
+            Coordinates of datum from which to start distance calculations (lat,lon)
+    process: bool
+        Should the CTD data be processed beyond splitting it into a dictonary by cruise year (default True)
 
     Returns:
     --------
@@ -564,9 +618,17 @@ def to_dict_by_cruise(ds: xr.Dataset) -> dict:
 
     #Split data into a dataset per cruise 
     transect_dict = split_by_coordinate(ds, 'cruise')
-    #Clean each dataset
-    for key in transect_dict:
-        #Clean and injest the transect data (add many new and useful variables)
-        transect_dict[key] = injest_CTD_transect(transect_dict[key])
+    if process:
+        if datum is None:
+            raise KeyError('Datum is required to process data')
+        #Clean each dataset
+        for key in transect_dict:
+            #Clean and injest the transect data (add many new and useful variables)
+            transect_dict[key] = injest_CTD_transect(transect_dict[key], datum=datum)
+    else:
+        #Just sort by distance
+        for key in transect_dict:
+            working_transect = transect_dict[key]
+            transect_dict[key] = working_transect.sortby(working_transect['distance'])
 
     return transect_dict
