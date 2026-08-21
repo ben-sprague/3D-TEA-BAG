@@ -18,6 +18,7 @@ from ..DOT.DataServer import DataServer
 
 def injest_CTD_transect(
         transect: xr.Dataset,
+        datum: tuple,
         ) -> xr.Dataset:
 
     '''
@@ -46,6 +47,8 @@ def injest_CTD_transect(
     Parameters
     ----------
     transect : xarray dataset with CTD data
+    datum: tuple,
+        Coordinates of datum from which to start distance calculations (lat,lon)
 
     Returns
     -------
@@ -54,6 +57,9 @@ def injest_CTD_transect(
 
     #Define constants
     g = 9.81 #m/s^2
+
+    #Extract datum lat/lon
+    datum_lat, datum_lon = datum
 
     direction = transect.attrs['direction']
 
@@ -70,6 +76,7 @@ def injest_CTD_transect(
     transect['fc'] = fod.fc(transect['lat'])
 
     #Calculate sea pressure from depth (but do not store in dataset)
+    ##TODO CHANGE TO USE BAKED IN PRS VARIABLE
     pressure = gsw.p_from_z(
         z = -np.asarray(transect['depth'].broadcast_like(transect['lat']).transpose('station', 'depth')),
         lat = transect['lat'].broadcast_like(transect['depth']).transpose('station', 'depth'))
@@ -87,9 +94,16 @@ def injest_CTD_transect(
                                         CT = transect['CT'].broadcast_like(transect['depth']).transpose('station', 'depth'))
 
     #Add distance
+    ##TODO ADD BACK DATUM TO STANDARIZE DISTANCE MEASURMENT
+    #Calculate distance along the transect (measured from the first point in the transect)
     distance_along_transect = np.cumsum(gsw.distance(transect['lon'], transect['lat']))/1000 #km
     distance_along_transect = np.concat((np.array([0]), distance_along_transect)) #Add 0 distance for first point
-    transect['distance'] = (('station'), distance_along_transect)
+
+    #Add in the distance from the datum to the begining of the transect
+    datum_to_transect_distance = gsw.distance([datum_lon, transect['lon'][0]], [datum_lat, transect['lat'][0]])/1000
+    absolute_distance = distance_along_transect + datum_to_transect_distance
+
+    transect['distance'] = (('station'), absolute_distance)
 
     #Add metadata
     transect = set_transect_metadata(transect)
@@ -315,6 +329,7 @@ def integrate_from_level_of_no_motion(
     deep_twind_shear = deep_twind_shear.isel(depth=slice(None, None, -1))
 
     #Integrate from bottom to surface and flip the array back so it goes from surface to bottom
+    print(deep_twind_shear)
     deep_agv = deep_twind_shear.cumulative_integrate(coord='depth').isel(depth=slice(None, None, -1))
 
     abs_geo_vel = xr.concat((shallow_agv, deep_agv), dim='station', join="outer")
@@ -560,7 +575,7 @@ def zip_by_coordinate(da_dict: dict,
 
     return comb_ds
 
-def to_dict_by_cruise(ds: xr.Dataset, process:bool = True) -> dict:
+def to_dict_by_cruise(ds: xr.Dataset, datum: tuple = None, process:bool = True) -> dict:
     '''
     Split n-dimension dataset into an array of datasets of dimension n-1 along a coorinate and injest the data
     
@@ -568,6 +583,8 @@ def to_dict_by_cruise(ds: xr.Dataset, process:bool = True) -> dict:
     -----------
     ds: Dataset
         Dataset with data from a single transect over multiple years
+    datum: tuple,
+            Coordinates of datum from which to start distance calculations (lat,lon)
     process: bool
         Should the CTD data be processed beyond splitting it into a dictonary by cruise year (default True)
 
@@ -580,9 +597,11 @@ def to_dict_by_cruise(ds: xr.Dataset, process:bool = True) -> dict:
     #Split data into a dataset per cruise 
     transect_dict = split_by_coordinate(ds, 'cruise')
     if process:
+        if datum is None:
+            raise KeyError('Datum is required to process data')
         #Clean each dataset
         for key in transect_dict:
             #Clean and injest the transect data (add many new and useful variables)
-            transect_dict[key] = injest_CTD_transect(transect_dict[key])
+            transect_dict[key] = injest_CTD_transect(transect_dict[key], datum=datum)
 
     return transect_dict
