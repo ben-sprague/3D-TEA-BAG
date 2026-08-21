@@ -238,72 +238,82 @@ def plot_transect(
         legend: bool = True,
         xlabel: bool = True,
         ylabel: bool = True,
+        x_coord: str = 'station'
         ) -> tuple[plt.Figure, plt.Axes]:
 
-    if colorbar:
-        fig, ax = plot_custom_section(
-            ds = transect,
-            x = x,
-            y = y,
-            data = data,
-            fig = fig,
-            ax = ax,
-            cmap = cmap,
-            levels = levels,
-            colorbar=colorbar,
-            xlabel = xlabel,
-            ylabel = ylabel
-        )
-    else:
-        fig, ax, cbar_obj = plot_custom_section(
-            ds = transect,
-            x = x,
-            y = y,
-            data = data,
-            fig = fig,
-            ax = ax,
-            cmap = cmap,
-            levels = levels,
-            colorbar=colorbar,
-            xlabel = xlabel,
-            ylabel = ylabel
-        )
+    #Drop x values where all y values are nan
+    mask = transect[data].isnull().all(dim = y)
+    drop_labels = transect[x_coord].where(mask, drop=True).values
+    transect = transect.drop_sel({x_coord: drop_labels})
 
-    ax.set_title(title)
-    ax.set_ylim(top = bounds['top'], bottom=bounds['bottom'])
-    ax.set_xlim(left = bounds['left'], right=bounds['right'])
+    if transect['station'].size > 1:
 
-
-    if cast_locations:
-            fig, ax = plot_cast_locations(
-                locations=transect[x],
+        if colorbar:
+            fig, ax = plot_custom_section(
+                ds = transect,
+                x = x,
+                y = y,
+                data = data,
                 fig = fig,
                 ax = ax,
-                color = 'k',
-                depth=5,
-                vertical_markers=True
+                cmap = cmap,
+                levels = levels,
+                colorbar=colorbar,
+                xlabel = xlabel,
+                ylabel = ylabel
             )
-    
-    if seafloor:
-        ax = plot_seafloor(
+        else:
+            fig, ax, cbar_obj = plot_custom_section(
+                ds = transect,
+                x = x,
+                y = y,
+                data = data,
+                fig = fig,
                 ax = ax,
-                transect = transect,
-                x_cord_variable = x,
-                draw_depth=bounds['bottom']
+                cmap = cmap,
+                levels = levels,
+                colorbar=colorbar,
+                xlabel = xlabel,
+                ylabel = ylabel
             )
 
-    if isohaline:
-            ax=plot_isoline(
-                ax = ax,
-                transect = transect,
-                x_cord_variable = x,
-                var = 'SP',
-                value = 34.8,
-            )
-    if legend:
-        ax.legend()
+        ax.set_title(title)
+        ax.set_ylim(top = bounds['top'], bottom=bounds['bottom'])
+        ax.set_xlim(left = bounds['left'], right=bounds['right'])
 
-    if colorbar:
-        return fig, ax
+
+        if cast_locations:
+                fig, ax = plot_cast_locations(
+                    locations=transect[x],
+                    fig = fig,
+                    ax = ax,
+                    color = 'k',
+                    depth=5,
+                    vertical_markers=True
+                )
+        
+        if seafloor:
+            ax = plot_seafloor(
+                    ax = ax,
+                    transect = transect,
+                    x_cord_variable = x,
+                    draw_depth=bounds['bottom']
+                )
+
+        if isohaline:
+                ax=plot_isoline(
+                    ax = ax,
+                    transect = transect,
+                    x_cord_variable = x,
+                    var = 'SP',
+                    value = 34.8,
+                )
+        if legend:
+            ax.legend()
+
+        if colorbar:
+            return fig, ax
+        else:
+            return fig, ax, cbar_obj
     else:
-        return fig, ax, cbar_obj
+        return fig, ax, None
