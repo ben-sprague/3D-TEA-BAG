@@ -30,6 +30,7 @@ def injest_CTD_transect(
     - Calculate potential temperature (PT)
     - Calculate distance along the transect based on a datum (distance)
     - Calculate the thermal wind field (m/s)
+    - Calculate 34.8PSU isohaline depth (m)
     By default, metadata is added to the following variables/dimentions:
     - depth
     - pressure
@@ -100,6 +101,15 @@ def injest_CTD_transect(
     absolute_distance = distance_along_transect + datum_to_transect_distance
 
     transect['distance'] = (('station'), absolute_distance)
+
+    #Calculate 34.8PSU isohaline depth
+    isohaline_depth = []
+    for station_id in transect['station']:
+        cast = transect.sel(station = station_id, depth = slice(0,1000))['SP']
+        gyre = cast.where(cast <= 34.8, drop = True)
+        isohaline_depth.append(gyre.dropna(dim = 'depth')['depth'].max().values)
+
+    transect['isohaline_depth'] = (('station'), isohaline_depth)
 
     #Add metadata
     transect = set_transect_metadata(transect)
@@ -183,6 +193,11 @@ def set_transect_metadata(ds: xr.Dataset) -> xr.Dataset:
             'units': 'kg/m^3',
             'long_name': 'Potential Density Anomaly',
             'standard_name': 'sea_water_potential_density',
+        },
+        'isohaline_depth': {
+            'units': 'm',
+            'long_name': '34.8PSU Isohaline Depth',
+            'standard_name': '34.8_psu_isohaline_depth',
         },
         
     }
