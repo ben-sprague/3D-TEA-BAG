@@ -4,6 +4,7 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 from scipy.interpolate import LinearNDInterpolator
 
 from ..io.readers import readDOT
@@ -37,6 +38,8 @@ class DataServer:
             Get a value from the merged dataset
         __closest_time
             Return the time closest to a given query
+        datasets()
+            Return the satellie Dataset objects
         '''
 
         self.sat_ds_new = readDOT(new_data_path)
@@ -70,8 +73,12 @@ class DataServer:
         self.overlap_end_time = self.sat_ds_old['time'].max()
         self.end_time = self.sat_ds_new['time'].max()
 
-        #Rename DOT variable in the new dataset for consistency
+        #Rename DOT, lat, and lon variable in the new dataset for consistency
         self.sat_ds_new = self.sat_ds_new.rename({'DOT_smoothed': 'DOT'}) #Select the smoothed DOT product to match the DOT product provided in the old dataset
+        self.sat_ds_new = self.sat_ds_new.rename({'lats': 'lat'})
+        self.sat_ds_new = self.sat_ds_new.rename({'lons': 'lon'})
+
+
 
         #Calculate the U and V components of geostrophic current with respect to lat/lon in the new dataset
         self.sat_ds_new['U'] = self.sat_ds_new['Geo_surf_current_y']*self.sat_ds_new['ang_c']+self.sat_ds_new['Geo_surf_current_x']*self.sat_ds_new['ang_s']
@@ -85,8 +92,8 @@ class DataServer:
         self.old_points = np.vstack((flat_lons, flat_lats)).T
 
         #New data
-        flat_lats = self.sat_ds_new['lats'].values.ravel()
-        flat_lons = self.sat_ds_new['lons'].values.ravel()
+        flat_lats = self.sat_ds_new['lat'].values.ravel()
+        flat_lons = self.sat_ds_new['lon'].values.ravel()
         self.new_points = np.vstack((flat_lons, flat_lats)).T
 
 
@@ -248,3 +255,17 @@ class DataServer:
         closest_time = time_grid[idx]
 
         return closest_time
+
+    def datasets(self) -> tuple[xr.Dataset, xr.Dataset]:
+        '''
+        Return the old and new satellite Datasets
+
+        Returns:
+        --------
+        sat_ds_old: Dataset
+            xarray Dataset with the old (2003-2014) Satellite Data
+        sat_ds_new: Dataset
+            xarray Dataset with the old (2011-2025) Satellite Data  
+        '''
+
+        return self.sat_ds_old, self.sat_ds_new
