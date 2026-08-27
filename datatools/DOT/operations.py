@@ -5,11 +5,13 @@ from https://www.cpom.ucl.ac.uk/dynamic_topography/index.php
 '''
 
 import numpy as np
+from numpy.typing import ArrayLike
 import xarray as xr
 
 import ocean_tools as fod
 from pyproj import Transformer
 from scipy.interpolate import RegularGridInterpolator
+from shapely import geometry
 
 
 
@@ -105,3 +107,25 @@ def bilinear_interp_npstere(data, x, y, target_lat, target_lon,
     result = interpolator(points)
 
     return result.item() if result.size == 1 else result
+
+def polygon_to_array(polygon: geometry.Polygon) -> ArrayLike:
+    '''
+    Convert a shapely polygon object in a numpy array of the verticies
+
+    Parameters:
+    -----------
+    polygon: Polygon:
+        Shapely Polygon
+    
+    Returns:
+    --------
+    verticies: ArralyLike:
+        2D array of verticies
+    '''
+
+    points = list(polygon.exterior.coords)
+    
+    #Convert list of tuples into a 2D array
+    verticies = np.array([list(t) for t in points])
+
+    return verticies
