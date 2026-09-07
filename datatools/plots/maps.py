@@ -6,6 +6,7 @@ import numpy as np
 import xarray as xr
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 
@@ -92,3 +93,46 @@ def plot_locations(ax: plt.axes,
                 label=label if i == 0 else '_nolegend_')
 
     return ax
+
+
+def truncate_colormap(cmap, minval=0.0, maxval=1.0, n=256):
+    new_cmap = LinearSegmentedColormap.from_list(
+        f'trunc({cmap.name},{minval:.2f},{maxval:.2f})',
+        cmap(np.linspace(minval, maxval, n))
+    )
+    return new_cmap
+
+def draw_bg_box(ax: plt.axes, color: str = 'k', linestyle: str = "-", linewidth: float = 1.5, label: str = 'BG Box') -> plt.axes:
+    '''
+    Draw the Beaufot Gyre Box
+    
+    Parameters:
+    -----------
+    ax: Axes
+        The axes to draw the box o
+    color: str
+        The color of the box (default 'k')
+    linestryle: str
+        The linestyle to draw the box with (default '-')
+    linewidth: float
+        The linewidth to draw the box with (default 1.5)
+    label: str
+        The legend label for the box (default 'BG Box')
+
+    Returns:
+    --------
+    bg_box_ax: Axes
+        A copy of ax with the BG box drawn on top
+    '''
+    bg_box_ax = ax
+    
+    #Plot the Beaufort Gyre Box
+    top_bottom_lon= np.linspace(-170, -130, 100)
+    top_lat = np.full_like(top_bottom_lon, 80.5)
+    bottom_lat = np.full_like(top_bottom_lon, 70.5)
+    bg_box_ax.plot([-170, -170], [70.5, 80.5], color = color, linestyle = linestyle, linewidth = linewidth, transform = ccrs.PlateCarree(), label = label)
+    bg_box_ax.plot([-130, -130], [70.5, 80.5], color = color, linestyle = linestyle, linewidth = linewidth, transform = ccrs.PlateCarree())
+    bg_box_ax.plot(top_bottom_lon, top_lat, color = color, linestyle = linestyle, linewidth = linewidth, transform = ccrs.PlateCarree())
+    bg_box_ax.plot(top_bottom_lon, bottom_lat, color = color, linestyle = linestyle, linewidth = linewidth, transform = ccrs.PlateCarree())
+
+    return bg_box_ax
