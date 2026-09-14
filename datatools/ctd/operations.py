@@ -124,6 +124,10 @@ def injest_CTD_transect(
     #Calculate thermal wind (du/dz, 1/s)
     rho = transect['pden']+1000 #Convert from potential density anamoly to potential density (kg/m^3)
     thermal_wind = g/transect['fc']/rho*drdx
+    if direction == 'ns':
+        #For North-South transects, flip the sign of thermal wind so that it matches convention (positive east)
+        thermal_wind = -thermal_wind
+
     transect['twind'] = thermal_wind.reset_coords('distance', drop=True)
 
     #Update thermal wind metadata
