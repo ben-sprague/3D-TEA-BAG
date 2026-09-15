@@ -248,7 +248,7 @@ def clean_CTD_dataset(
             if cast_depth < min_depth and distance > min_distance:
                 stations_to_drop.append(station_id)
     elif dir == 'ew':
-        #For north south, discard all casts shallower than 400m regardless of distance (because there is no point with bathymetry shallower than 400m)
+        #For east west, discard all casts shallower than 400m regardless of distance (because there is no point with bathymetry shallower than 400m)
         min_depth = 600 #m
         for station_id in clean_ds['station']:
             distance = (working_station := clean_ds.sel(station = station_id))['distance']
@@ -328,7 +328,7 @@ def integrate_from_level_of_no_motion(
             if cast_depth < min_depth and distance > min_distance:
                 stations_to_drop.append(station_id)
     elif dir == 'ew':
-        #For north south, discard all casts shallower than the level of no motion regardless of distance (because there is no point with bathymetry shallower than 400m)
+        #For east west, discard all casts shallower than the level of no motion regardless of distance (because there is no point with bathymetry shallower than 400m)
         min_depth = level_no_motion #m
         for station_id in transect['station']:
             distance = (working_station := transect.sel(station = station_id))['distance']
@@ -423,8 +423,8 @@ def integrate_from_surface_current(
         #North-south transect
         norm_vec = np.hstack((dlat_dlon, np.ones_like(dlat_dlon)))
 
-        #For north-south transect, always have normal vector point west (where west is the negative x-direction)
-        mask = norm_vec[:,0] > 0 #All rows where the x-component is greater than zero (ie. pointing east instead of west)
+        #For north-south transect, always have normal vector point east (where east is the positive x-direction)
+        mask = norm_vec[:,0] < 0 #All rows where the x-component is greater than zero (ie. pointing west instead of east)
         norm_vec[mask,:] = -norm_vec[mask,:]
     elif transect_direction == 'ew':
         #East-west transect
