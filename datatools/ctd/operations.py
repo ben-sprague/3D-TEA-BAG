@@ -5,7 +5,6 @@ A set of specialty dataset opperations for working with CTD data
 import xarray as xr
 import numpy as np
 from numpy.typing import ArrayLike
-from numpy import linalg as LA
 from pyproj import Geod
 from scipy.spatial import cKDTree
 from scipy.sparse import csr_matrix
@@ -394,7 +393,6 @@ def integrate_from_surface_current(
         transect: xr.Dataset,
         sat_data_server: DataServer,
         sat_data_priority: str,
-        transect_direction: str,
             ) -> xr.DataArray:
     '''
     Integrate the absolute geostrophic current based on a level of no motion
@@ -417,24 +415,36 @@ def integrate_from_surface_current(
     '''
 
     #Get the vector normal to the transect at each station
-    dlat_dlon = np.gradient(transect['lat'], transect['lon']).reshape((-1,1))
+    transect_direction = transect.attrs['direction']
+
+    geod = Geod(ellps="WGS84")
+
+    lon, lat = transect['lon'].values, transect['lat'].values
+    az = np.empty_like(lon)
+
+    # centered: bearing from point i-1 to point i+1
+    az[1:-1], _, _ = geod.inv(lon[:-2], lat[:-2], lon[2:], lat[2:])
+    # ends: one-sided
+    az[0],  _, _ = geod.inv(lon[0],  lat[0],  lon[1],  lat[1])
+    az[-1], _, _ = geod.inv(lon[-2], lat[-2], lon[-1], lat[-1])
+
+    az = np.deg2rad(az)                 # clockwise from north
+    t_e, t_n = np.sin(az), np.cos(az)   # tangent
+    n_e, n_n = -t_n, t_e                # left normal
 
     if transect_direction == 'ns':
         #North-south transect
-        norm_vec = np.hstack((dlat_dlon, np.ones_like(dlat_dlon)))
+        unit_norm_vec = np.vstack((n_e, n_n)).T
 
         #For north-south transect, always have normal vector point east (where east is the positive x-direction)
-        mask = norm_vec[:,0] < 0 #All rows where the x-component is greater than zero (ie. pointing west instead of east)
-        norm_vec[mask,:] = -norm_vec[mask,:]
+        mask = unit_norm_vec[:,0] < 0 #All rows where the x-component is less than zero (ie. pointing west instead of east)
+        unit_norm_vec[mask,:] = -unit_norm_vec[mask,:]
     elif transect_direction == 'ew':
         #East-west transect
-        norm_vec = np.hstack((dlat_dlon, np.ones_like(dlat_dlon)))
+        unit_norm_vec = np.vstack((n_e, n_n)).T
 
-        #For east-west transect, always have normal vector point north (where north is the positive y-direction)
-        mask = norm_vec[:,1] < 0 #All rows where the y-component is less than zero (ie. pointing south instead of north)
-        norm_vec[mask,:] = -norm_vec[mask,:]
-
-    unit_norm_vec = norm_vec/(LA.norm(norm_vec, axis=1).reshape((-1,1)))
+        #For east-west transect, vector will always point north
+        pass
 
     #Get the geostrophic surface current at each station
     _, u_geo_surf_current, v_geo_surf_current = sat_data_server.get(transect['date'], transect['lat'], transect['lon'], priority=sat_data_priority)
